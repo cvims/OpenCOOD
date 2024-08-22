@@ -9,6 +9,7 @@ import numpy as np
 from logreplay.assets.utils import find_town, find_blue_print
 from logreplay.assets.presave_lib import bcolors
 from logreplay.map.map_manager import MapManager
+from logreplay.agent.agent_manager import AgentManager
 from logreplay.sensors.sensor_manager import SensorManager
 from opencood.hypes_yaml.yaml_utils import load_yaml
 
@@ -134,10 +135,21 @@ class SceneManager:
         # spectator
         self.spectator = self.world.get_spectator()
         # hd map manager per scene
-        self.map_manager = MapManager(self.world,
-                                      self.scenario_params['map'],
-                                      self.output_root,
-                                      self.scene_name)
+        self.map_manager = MapManager(
+            self.world,
+            self.scenario_params['map'],
+            self.output_root,
+            self.scene_name
+        )
+    
+        # agent manager
+        self.agent_manager = AgentManager(
+            self.client,
+            self.world,
+            self.scenario_params['agent'],
+            self.output_root,
+            self.scene_name
+        )                                          
 
     def tick(self):
         """
@@ -199,6 +211,7 @@ class SceneManager:
         # we dump data after tick() so the agent can retrieve the newest info
         self.sensor_dumping(cur_timestamp)
         self.map_dumping()
+        self.agent_dumping()
 
         return True
 
@@ -212,6 +225,15 @@ class SceneManager:
         for veh_id, veh_content in self.veh_dict.items():
             if 'cav' in veh_content:
                 self.map_manager.run_step(veh_id, veh_content, self.veh_dict)
+        
+    def agent_dumping(self):
+        """
+        Dump agent related.
+
+        Parameters
+        ----------
+        """
+        self.agent_manager.run_step(self.cur_count)
 
     def sensor_dumping(self, cur_timestamp):
         for veh_id, veh_content in self.veh_dict.items():

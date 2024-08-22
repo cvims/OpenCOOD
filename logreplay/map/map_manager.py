@@ -402,7 +402,7 @@ class MapManager(object):
         for tl_id, tl_content in self.traffic_light_info.items():
             trigger_poly = tl_content['corners']
             # use Path to do fast computation
-            trigger_path = Path(trigger_poly.boundary)
+            trigger_path = Path(list(trigger_poly.boundary.coords))
             # check if any point in the middle line inside the trigger area
             check_array = trigger_path.contains_points(mid_lane[:, :2])
 
@@ -526,7 +526,11 @@ class MapManager(object):
             while nxt.road_id == waypoint.road_id \
                     and nxt.lane_id == waypoint.lane_id:
                 waypoints.append(nxt)
-                nxt = nxt.next(self.lane_sample_resolution)[0]
+                nxt = nxt.next(self.lane_sample_resolution)
+                if len(nxt) == 0:
+                    break
+                else:
+                    nxt = nxt[0]
 
             # waypoint is the centerline, we need to calculate left lane mark
             left_marking = [lateral_shift(w.transform, -w.lane_width * 0.5) for
