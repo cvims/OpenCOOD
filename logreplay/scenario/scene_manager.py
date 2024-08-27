@@ -172,12 +172,12 @@ class SceneManager:
                                       (cav_content['true_ego_pos'])))
 
             self.veh_dict[cav_id]['cav'] = True
-            # spawn the sensor on each cav
-            if 'sensor_manager' not in self.veh_dict[cav_id]:
-                self.veh_dict[cav_id]['sensor_manager'] = \
-                    SensorManager(cav_id, self.veh_dict[cav_id],
-                                  self.world, self.scenario_params['sensor'],
-                                  self.output_root)
+            # # spawn the sensor on each cav
+            # if 'sensor_manager' not in self.veh_dict[cav_id]:
+            #     self.veh_dict[cav_id]['sensor_manager'] = \
+            #         SensorManager(cav_id, self.veh_dict[cav_id],
+            #                       self.world, self.scenario_params['sensor'],
+            #                       self.output_root)
 
             # set the spectator to the first cav
             if i == 0:
@@ -209,9 +209,9 @@ class SceneManager:
         self.world.tick()
 
         # we dump data after tick() so the agent can retrieve the newest info
-        self.sensor_dumping(cur_timestamp)
+        # self.sensor_dumping(cur_timestamp)
         self.map_dumping()
-        self.agent_dumping()
+        self.agent_dumping(cur_timestamp)
 
         return True
 
@@ -226,14 +226,14 @@ class SceneManager:
             if 'cav' in veh_content:
                 self.map_manager.run_step(veh_id, veh_content, self.veh_dict)
         
-    def agent_dumping(self):
+    def agent_dumping(self, cur_timestamp):
         """
         Dump agent related.
 
         Parameters
         ----------
         """
-        self.agent_manager.run_step(self.cur_count)
+        self.agent_manager.run_step(cur_timestamp, self.veh_dict)
 
     def sensor_dumping(self, cur_timestamp):
         for veh_id, veh_content in self.veh_dict.items():
@@ -275,10 +275,23 @@ class SceneManager:
         vehicle = \
             self.world.try_spawn_actor(cav_bp, cur_pose)
 
+        permutations = 0
         while not vehicle:
             cur_pose.location.z += 0.01
             vehicle = \
                 self.world.try_spawn_actor(cav_bp, cur_pose)
+            permutations += 1
+        
+        # reduce z value again to initial z
+        new_location = carla.Location(
+            x=cur_pose.location.x,
+            y=cur_pose.location.y,
+            z=cur_pose.location.z - (0.01 * permutations))
+        cur_pose = carla.Transform(new_location, cur_pose.rotation)
+        vehicle.set_transform(cur_pose)
+
+        control = carla.VehicleControl(throttle=0.0, brake=1.0, steer=0.0)
+        vehicle.apply_control(control)
 
         self.veh_dict.update({str(cav_id): {
             'cur_pose': cur_pose,
@@ -327,10 +340,24 @@ class SceneManager:
         vehicle = \
             self.world.try_spawn_actor(veh_bp, cur_pose)
 
+        permutations = 0
         while not vehicle:
             cur_pose.location.z += 0.01
             vehicle = \
                 self.world.try_spawn_actor(veh_bp, cur_pose)
+            permutations += 1
+        
+        # reduce z value again to initial z
+        new_location = carla.Location(
+            x=cur_pose.location.x,
+            y=cur_pose.location.y,
+            z=cur_pose.location.z - (0.01 * permutations))
+        cur_pose = carla.Transform(new_location, cur_pose.rotation)
+        vehicle.set_transform(cur_pose)
+        
+        control = carla.VehicleControl(throttle=0.0, brake=1.0, steer=0.0)
+        vehicle.apply_control(control)
+        
 
         self.veh_dict.update({str(bg_veh_id): {
             'cur_pose': cur_pose,
@@ -363,6 +390,8 @@ class SceneManager:
         self.veh_dict[veh_id]['actor'].set_transform(transform)
         self.veh_dict[veh_id]['cur_count'] = cur_timestamp
         self.veh_dict[veh_id]['cur_pose'] = transform
+        control = carla.VehicleControl(throttle=0.0, brake=1.0, steer=0.0)
+        self.veh_dict[veh_id]['actor'].apply_control(control)
 
     def close(self):
         self.world.apply_settings(self.origin_settings)

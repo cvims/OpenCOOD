@@ -181,12 +181,29 @@ class AgentManager(object):
         self.agent_list.extend(spawned_walkers)
 
 
-    def run_step(self, timestamp):
+    def run_step(self, timestamp, vehicle_dict):
         self.current_timstamp = timestamp
-        self.data_dump()
+        self.data_dump(vehicle_dict)
 
     
-    def data_dump(self):
+    def format_agent_attributes(self, agent):
+        _transform = agent.get_transform()
+        _bbx = agent.bounding_box
+        _loc = agent.get_location()
+        angle = [_transform.rotation.roll, _transform.rotation.yaw, _transform.rotation.pitch]
+        center =  [_bbx.location.x, _bbx.location.y, _bbx.location.z]
+        extent = [_bbx.extent.x, _bbx.extent.y, _bbx.extent.z]
+        location = [_loc.x, _loc.y, _loc.z]
+
+        return dict(
+            angle=angle,
+            center=center,
+            extent=extent,
+            location=location
+        )
+
+
+    def data_dump(self, vehicle_dict):
         if not self.activate:
             return
 
@@ -196,22 +213,32 @@ class AgentManager(object):
             all_agents = self.world.get_actors()
         else:
             all_agents = self.agent_list
+
+        vehicle_agents = {}
+        walker_agents = {}
+
+        for agent in all_agents:
+            # get correct initial actor id through the vehicle dict
+            agent_id = agent.id
+            for veh_id, value in vehicle_dict.items():
+                if value['actor_id'] == agent_id:
+                    agent_id = veh_id
+                    break
+            if 'vehicle' in agent.type_id:
+                vehicle_agents[agent_id] = self.format_agent_attributes(agent)
+            elif 'walker' in agent.type_id:
+                walker_agents[agent_id] = self.format_agent_attributes(agent)
         
-        # dict(
-        #     agent_type: dict(
-        #         agent_id: dict(
-        #             angle: [value[0], value[1], value[2]]
-        #             center: [value[0], value[1], value[2]]
-        #             extent: [value[0], value[1], value[2]]
-        #             location: [value[0], value[1], value[2]]
-        #         )
-        #)
+        all_agents = dict(
+            vehicles=vehicle_agents,
+            walkers=walker_agents
+        )
     
         if self.save_yml:
             # save metadata
             save_yaml_name = os.path.join(
                 self.out_root,
-                self.current_timstamp + '_additional.yaml')
+                self.current_timstamp + '_all_agents.yaml')
             
             save_yaml_wo_overwriting(
                 all_agents, save_yaml_name

@@ -241,6 +241,11 @@ def save_yaml(data, save_name):
         Full path of the output yaml file.
     """
 
+    # create the folder if not exist
+    folder = os.path.dirname(save_name)
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
     with open(save_name, 'w') as outfile:
         yaml.dump(data, outfile, default_flow_style=False)
 

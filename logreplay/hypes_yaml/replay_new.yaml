@@ -47,25 +47,25 @@ sensor: # new attached sensor
   sensor_list:
     - name: 'depth_camera'
       args:
-        fov: 110
+        fov: 100
         image_size_x: 800
         image_size_y: 600
         relative_pose: front
     - name: 'depth_camera'
       args:
-        fov: 110
+        fov: 100
         image_size_x: 800
         image_size_y: 600
         relative_pose: left
     - name: 'depth_camera'
       args:
-        fov: 110
+        fov: 100
         image_size_x: 800
         image_size_y: 600
         relative_pose: right
     - name: 'depth_camera'
       args:
-        fov: 110
+        fov: 100
         image_size_x: 800
         image_size_y: 600
         relative_pose: back

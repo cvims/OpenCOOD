@@ -27,7 +27,7 @@ class DepthCamera(BaseSensor):
         relative_position = config['relative_pose']
         spawn_point = SemanticLidar.spawn_point_estimation(
             relative_position, global_position)
-        self.name = 'depth_camera' + str(relative_position)
+        self.name = '_'.join(['depth_camera', str(relative_position)])
 
         if vehicle is not None:
             self.sensor = world.spawn_actor(
@@ -62,9 +62,11 @@ class DepthCamera(BaseSensor):
         self.timestamp = event.timestamp
 
     def data_dump(self, output_root, cur_timestamp):
+        while not hasattr(self, 'raw_image') or self.raw_image is None:
+            continue
         # dump the image
         raw_output_label_name = os.path.join(
-            output_root, cur_timestamp + '_depth_raw.png')       
+            output_root, cur_timestamp + f'_{self.name}.png')       
         
         # raw image to disk
         cv2.imwrite(raw_output_label_name, self.raw_image)
@@ -83,12 +85,15 @@ class DepthCamera(BaseSensor):
                 camera_transformation.rotation.roll,
                 camera_transformation.rotation.yaw,
                 camera_transformation.rotation.pitch]
+    
+        # inverse
+        camera_transformation.get_inverse_matrix()
 
-        bev_sem_cam_info = {self.name:
-                                {
-                                    'cords': cords,
-                                    'extrinsic': camera_transformation,
-                                    'intrinsic': camera_intrinsic
-                                }}
+        depth_cam_info = {self.name:
+                            {
+                                'cords': cords,
+                                'extrinsic': camera_transformation.get_matrix(),
+                                'intrinsic': camera_intrinsic
+                            }}
 
-        save_yaml_wo_overwriting(bev_sem_cam_info, save_yaml_name)
+        save_yaml_wo_overwriting(depth_cam_info, save_yaml_name)
