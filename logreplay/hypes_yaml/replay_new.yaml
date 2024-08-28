@@ -16,7 +16,7 @@ agent:
         spawn_count: 0 # the number of walkers to spawn
 
 map: # corresponding to bev map
-  activate: false # whether activate HDMap module
+  activate: true # whether activate HDMap module
   visualize: false # whether to visualize the BEV Map for each CAV
 
   save_yml: true # whether to save the map meta data in yaml files
@@ -40,8 +40,8 @@ map: # corresponding to bev map
   dynamic:
     exclude_self: true # if set to true, ego won't be drawed
     exclude_off_road: true # eclude the objects that are off road
-    visibility: false # whether save visibility mask under ego coordinate. when set to true, semantic lidar has to be implemented
-    visibility_corp: false # whether save visibility mask that can be seen for all cavs. when set to true, semantic lidar has to be implemented
+    visibility: true # whether save visibility mask under ego coordinate. when set to true, semantic lidar has to be implemented
+    visibility_corp: true # whether save visibility mask that can be seen for all cavs. when set to true, semantic lidar has to be implemented
 
 sensor: # new attached sensor
   sensor_list:
@@ -69,28 +69,38 @@ sensor: # new attached sensor
         image_size_x: 800
         image_size_y: 600
         relative_pose: back
-    # - name: 'semantic_lidar'
-    #   args: &base_semantic_lidar
-    #     upper_fov: 10
-    #     lower_fov: -30
-    #     channels: 32
-    #     rotation_frequency: 20
-    #     points_per_second: 250000
-    #     range: 50
-    #     relative_pose: front
-    #     thresh: 5 # mininum number of points hit to be regarded as visible
-    # - name: 'semantic_lidar'
-    #   args:
-    #     <<: *base_semantic_lidar
-    #     relative_pose: left
-    # - name: 'semantic_lidar'
-    #   args:
-    #     <<: *base_semantic_lidar
-    #     relative_pose: right
-    # - name: 'semantic_lidar'
-    #   args:
-    #     <<: *base_semantic_lidar
-    #     relative_pose: back
+    - name: 'semantic_lidar'
+      args: &base_semantic_lidar
+        upper_fov: 10
+        lower_fov: -30
+        channels: 32
+        rotation_frequency: 20
+        points_per_second: 250000
+        range: 50
+        relative_pose: front
+        thresh: 5 # mininum number of points hit to be regarded as visible
+    - name: 'semantic_lidar'
+      args:
+        <<: *base_semantic_lidar
+        relative_pose: left
+    - name: 'semantic_lidar'
+      args:
+        <<: *base_semantic_lidar
+        relative_pose: right
+    - name: 'semantic_lidar'
+      args:
+        <<: *base_semantic_lidar
+        relative_pose: back
+    - name: 'semantic_lidar'
+      args:
+        upper_fov: 5
+        lower_fov: -25
+        channels: 64
+        rotation_frequency: 20
+        points_per_second: 1300000
+        range: 120
+        relative_pose: top
+        thresh: 5 # mininum number of points hit to be regarded as visible
     # - name: 'bev_semantic_camera'
     #   args:
     #     visualize: false

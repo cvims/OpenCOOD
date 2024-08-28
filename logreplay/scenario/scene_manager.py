@@ -172,12 +172,12 @@ class SceneManager:
                                       (cav_content['true_ego_pos'])))
 
             self.veh_dict[cav_id]['cav'] = True
-            # # spawn the sensor on each cav
-            # if 'sensor_manager' not in self.veh_dict[cav_id]:
-            #     self.veh_dict[cav_id]['sensor_manager'] = \
-            #         SensorManager(cav_id, self.veh_dict[cav_id],
-            #                       self.world, self.scenario_params['sensor'],
-            #                       self.output_root)
+            # spawn the sensor on each cav
+            if 'sensor_manager' not in self.veh_dict[cav_id]:
+                self.veh_dict[cav_id]['sensor_manager'] = \
+                    SensorManager(cav_id, self.veh_dict[cav_id],
+                                  self.world, self.scenario_params['sensor'],
+                                  self.output_root)
 
             # set the spectator to the first cav
             if i == 0:
@@ -209,7 +209,7 @@ class SceneManager:
         self.world.tick()
 
         # we dump data after tick() so the agent can retrieve the newest info
-        # self.sensor_dumping(cur_timestamp)
+        self.sensor_dumping(cur_timestamp)
         self.map_dumping()
         self.agent_dumping(cur_timestamp)
 

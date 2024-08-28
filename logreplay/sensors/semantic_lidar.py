@@ -3,7 +3,7 @@ This is mainly used to filter out objects that is not in the sight
 of cameras.
 """
 import weakref
-
+import os
 import carla
 import cv2
 import numpy as np
@@ -110,11 +110,18 @@ class SemanticLidar(BaseSensor):
                                             y=carla_location.y - 0.3,
                                             z=carla_location.z + 1.8)
             yaw = -100
-        else:
+        elif relative_position == 'back':
             carla_location = carla.Location(x=carla_location.x - 2.0,
                                             y=carla_location.y,
                                             z=carla_location.z + 1.5)
             yaw = 180
+        elif relative_position == 'top':
+            carla_location = carla.Location(x=carla_location.x - 0.5,
+                                            y=carla_location.y,
+                                            z=carla_location.z + 1.9)
+            yaw = 0
+        else:
+            raise ValueError('Unknown relative position')
 
         carla_rotation = carla.Rotation(roll=0, yaw=yaw, pitch=pitch)
         spawn_point = carla.Transform(carla_location, carla_rotation)
@@ -138,3 +145,35 @@ class SemanticLidar(BaseSensor):
 
         # these are the ids that are visible
         return vehicle_id_filter
+
+    def data_dump(self, output_root, cur_timestamp):
+        while not hasattr(self, 'data') or self.data is None:
+            continue
+
+        # dump the image
+        raw_output_label_name = os.path.join(
+            output_root, cur_timestamp + f'_{self.name}.pcd')
+        
+        # filter obj tags into numpy array
+        test = np.array(self.data.tolist(), dtype=np.float32).reshape(-1, 6)
+        a = test[test[:, 5] == 10]
+        ids = np.unique(a[:, 4])
+        
+        # semantic lidar to pcd
+        with open(raw_output_label_name, 'w') as f:
+            f.write('# .PCD v0.7 - Point Cloud Data file format\n')
+            f.write('VERSION 0.7\n')
+            f.write('FIELDS x y z intensity obj_idx obj_tag\n')
+            f.write('SIZE 4 4 4 4 4 4\n')
+            f.write('TYPE F F F F I I\n')
+            f.write('COUNT 1 1 1 1 1 1\n')
+            f.write('WIDTH %d\n' % self.data.shape[0])
+            f.write('HEIGHT 1\n')
+            f.write('VIEWPOINT 0 0 0 1 0 0 0\n')
+            f.write('POINTS %d\n' % self.data.shape[0])
+            f.write('DATA ascii\n')
+
+            for i in range(self.data.shape[0]):
+                f.write('%f %f %f %f %d %d\n' % (self.data[i][0], self.data[i][1],
+                                                 self.data[i][2], self.data[i][3],
+                                                 self.data[i][4], self.data[i][5]))

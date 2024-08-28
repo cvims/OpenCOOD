@@ -3,6 +3,7 @@ from collections import OrderedDict
 
 from opencood.hypes_yaml.yaml_utils import load_yaml
 from logreplay.scenario.scene_manager import SceneManager
+from logreplay.assets.utils import find_town
 
 
 class ScenariosManager:
@@ -35,6 +36,10 @@ class ScenariosManager:
         # loop over all scenarios
         for (i, scenario_folder) in enumerate(scenario_folders):
             scene_name = os.path.split(scenario_folder)[-1]
+
+            if find_town(scene_name) is None:
+                continue
+
             self.scenario_database.update({scene_name: OrderedDict()})
 
             # load the collection yaml file

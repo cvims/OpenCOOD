@@ -16,6 +16,10 @@ def find_town(scenario_name):
     -------
     The corresponding town's name.
     """
+    if scenario_name not in TOWN_DICTIONARY:
+        print('Town not found for %s' % scenario_name)
+        return None
+
     return TOWN_DICTIONARY[scenario_name]
 
 

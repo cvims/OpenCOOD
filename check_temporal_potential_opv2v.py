@@ -1,7 +1,106 @@
 import os
-import yaml
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
 import tqdm
 import opencood.hypes_yaml.yaml_utils as yaml_utils
+
+
+def visualize_temporal_potential(yaml_content, temporal_potential_ids):
+    """
+    Visualizes the temporal potential of the vehicles (side-by-side)
+    :param yaml_content: list of yaml content
+    :param temporal_potential_ids: list of vehicle ids with temporal potential
+    """
+    # for each yaml content, visualize the vehicles
+    subplot_count = len(yaml_content)
+    # subplot_count images next to each other
+    fig, axs = plt.subplots(1, subplot_count, figsize=(subplot_count*5, 5))
+
+
+def create_bev_image(ego_data, vehicles_data, pixel_size=256, meter_size=100):
+    ego_loc = np.array(ego_data[:3])
+    ego_rot = np.array(ego_data[3:])
+
+    # create image
+    image = np.zeros((pixel_size, pixel_size, 3), dtype=np.uint8)
+
+    # calculate relative positions
+    for vehicle_data in vehicles_data.values():
+        vehicle_loc = np.array(vehicle_data['location'])
+        vehicle_rot = np.array(vehicle_data['angle'])
+        vehicle_extent = np.array(vehicle_data['extent'])
+
+        # bounding box coordinates of vehicle
+        bbox_2d = np.array([
+            [-vehicle_extent[0], -vehicle_extent[1]],
+            [vehicle_extent[0], -vehicle_extent[1]],
+            [vehicle_extent[0], vehicle_extent[1]],
+            [-vehicle_extent[0], vehicle_extent[1]]
+        ])
+
+        # rotate bounding box
+        yaw = vehicle_rot[1]
+        yaw = np.deg2rad(yaw)
+        rot_matrix = np.array([
+            [np.cos(yaw), -np.sin(yaw)],
+            [np.sin(yaw), np.cos(yaw)]
+        ])
+
+        bbox_2d_rot = np.dot(rot_matrix, bbox_2d.T).T
+
+        # translate bounding box
+        bbox = bbox_2d_rot + vehicle_loc[:2]
+
+        # relative position to ego vehicle
+        bbox -= ego_loc[:2]
+
+        # add half of the meter size to the center
+        bbox += meter_size / 2
+
+        # scale to pixel size
+        bbox = bbox / meter_size * pixel_size
+
+        # draw bounding box
+        bbox = bbox.astype(np.int32)
+
+        # coordinates are in x (forward), y (right) format
+        bbox = bbox[:, [1, 0]]
+
+        cv2.polylines(image, [bbox], isClosed=True, color=(255, 0, 0), thickness=2)
+    
+    # draw ego vehicle (centered)
+    ego_bbox = np.array([
+        [-1, -1],
+        [1, -1],
+        [1, 1],
+        [-1, 1]
+    ])
+
+    ego_yaw = ego_rot[1]
+    ego_yaw = np.deg2rad(ego_yaw)
+    ego_rot_matrix = np.array([
+        [np.cos(ego_yaw), -np.sin(ego_yaw)],
+        [np.sin(ego_yaw), np.cos(ego_yaw)]
+    ])
+
+    ego_bbox_rot = np.dot(ego_rot_matrix, ego_bbox.T).T
+    
+    ego_bbox = ego_bbox_rot + ego_loc[:2]
+    ego_bbox -= ego_loc[:2]
+    ego_bbox += meter_size / 2
+    ego_bbox = ego_bbox / meter_size * pixel_size
+
+    ego_bbox = ego_bbox.astype(np.int32)
+    cv2.polylines(image, [ego_bbox], isClosed=True, color=(0, 255, 0), thickness=2)
+
+    # flip image horizontally
+    image = cv2.flip(image, 0)
+
+    # save iamge
+    plt.imsave('bev_image.png', image)
+    
+    return image
 
 
 def check_vehicles_in_range(ego_loc, vehicles, rasterized_range=50):
@@ -48,14 +147,17 @@ def check_temporal_potential(frame_vehicle_ids: list):
     # check if id is in at least two frames but not in the last
 
     temporal_potential_count = 0
+    temporal_potential_ids = []
     for id, occurences in id_occurences.items():
         if occurences >= 2 and id not in id_occurences_last:
-            # print(f'Temporal potential for id {id}')
+            print(f'Temporal potential for id {id}')
             temporal_potential_count += 1
+            temporal_potential_ids.append(id)
     
-    return temporal_potential_count
+    return temporal_potential_ids, temporal_potential_count
 
 if __name__ == '__main__':
+    output_vis_path = r'/home/dominik/Git_Repos/Private/OpenCOOD/visualizations'
     org_dataset_path = r'/data/public_datasets/OPV2V/original/train'
 
     frames_to_check = 4
@@ -97,12 +199,16 @@ if __name__ == '__main__':
             # check if vehicles are in range
             in_range_ids = []
             for frame in yaml_content:
-                # ids = check_vehicles_in_range(frame['true_ego_pos'][:3], frame['vehicles'], rasterized_range)
-                ids = frame['vehicles'].keys()
+                ids = check_vehicles_in_range(frame['true_ego_pos'][:3], frame['vehicles'], rasterized_range)
+                # ids = frame['vehicles'].keys()
                 in_range_ids.append(ids)
             
             # check temporal potential
-            temporal_potential_count_all += check_temporal_potential(in_range_ids)
+            temporal_potential_ids, temporal_potential_count = check_temporal_potential(in_range_ids)
+            temporal_potential_count_all += temporal_potential_count
+
+            # visualize_temporal_potential(yaml_content, temporal_potential_ids)
+            create_bev_image(yaml_content[0]['true_ego_pos'], yaml_content[0]['vehicles'])
     
     print(f'All frames count: {all_frames_count}')
     print(f'Temporal potential count: {temporal_potential_count_all}')
