@@ -149,7 +149,7 @@ class SceneManager:
             self.scenario_params['agent'],
             self.output_root,
             self.scene_name
-        )                                          
+        )
 
     def tick(self):
         """
