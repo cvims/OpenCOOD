@@ -2,6 +2,7 @@ import opencood.hypes_yaml.yaml_utils as yaml_utils
 import open3d as o3d
 import os
 import numpy as np
+import copy
 
 
 def load_pcd_file(pcd_file):
@@ -21,7 +22,8 @@ def draw_3d_bbox(pcd, v_3d_boxes):
     :param v_3d_boxes: list of 3d bounding boxes
     :return: point cloud with 3d bounding boxes
     """
-    combined_pcd = pcd
+    # clone pcd
+    combined_pcd = copy.deepcopy(pcd)
 
     for v_3d_box in v_3d_boxes:
         lines = [
@@ -29,13 +31,7 @@ def draw_3d_bbox(pcd, v_3d_boxes):
             [4, 5], [5, 6], [6, 7], [7, 4],
             [0, 4], [1, 5], [2, 6], [3, 7]
         ]
-        colors = [[1, 0, 0] for i in range(len(lines))]
 
-        line_set = o3d.geometry.LineSet(
-            points=o3d.utility.Vector3dVector(v_3d_box),
-            lines=o3d.utility.Vector2iVector(lines)
-        )
-        line_set.colors = o3d.utility.Vector3dVector(colors)
         # Sample points from the lines and add them to the point cloud
         sampled_points = []
         num_points_per_line = 10
@@ -55,6 +51,27 @@ def draw_3d_bbox(pcd, v_3d_boxes):
     return combined_pcd
 
 
+def point_in_3d_bounding_box(point, bounding_box_3d):
+    """
+    Check if a point is inside a 3D bounding box
+    :param point: point
+    :param bounding_box_3d: 3D bounding box coordinates
+        format: np.array([[x1, y1, z1], [x2, y2, z2], ...])
+    """
+    # check if point is inside the bounding box
+    min_x, min_y, min_z = np.min(bounding_box_3d, axis=0)
+    max_x, max_y, max_z = np.max(bounding_box_3d, axis=0)
+
+    offset = 0.01
+
+    if min_x - offset <= point[0] <= max_x + offset and \
+        min_y - offset <= point[1] <= max_y + offset and \
+        min_z - offset <= point[2] <= max_z + offset:
+        return True
+
+    return False
+
+
 def calculate_lidar_hits(pcd, lidar_pose, vehicles):
     # x,y,z
     lidar_position = np.asarray(lidar_pose[:3]) # world coordinates (x,y,z)
@@ -72,7 +89,11 @@ def calculate_lidar_hits(pcd, lidar_pose, vehicles):
     pcd_points = np.dot(R, pcd_points.T).T
     pcd_points += lidar_position
 
-    v_3d_boxes = []
+    # to o3d pcd
+    _pcd = o3d.geometry.PointCloud()
+    _pcd.points = o3d.utility.Vector3dVector(pcd_points)
+
+    v_3d_boxes = {}
     for v_id, v_data in vehicles.items():
         angle = v_data['angle'] # pitch, yaw, roll
         extent = v_data['extent']
@@ -80,14 +101,24 @@ def calculate_lidar_hits(pcd, lidar_pose, vehicles):
 
         v_3d_bbox = generate_3d_bbox(extent, location, angle)
         # add lidar position to the 3d bounding box
-        v_3d_bbox -= lidar_position
-        v_3d_boxes.append(v_3d_bbox)
+        # v_3d_bbox -= lidar_position
+        v_3d_boxes[v_id] = v_3d_bbox
     
     # draw the 3d bounding boxes into point cloud
-    pcd = draw_3d_bbox(pcd, v_3d_boxes)
+    #d_pcd = draw_3d_bbox(_pcd, v_3d_boxes.values())
 
     # save pcd
-    o3d.io.write_point_cloud('output.pcd', pcd)
+    #o3d.io.write_point_cloud('output.pcd', d_pcd)
+
+    v_hits = {}
+    for point in np.asarray(_pcd.points):
+    # Iterate through the 3D boxes and check for a hit
+        for v_id, v_3d_box in v_3d_boxes.items():
+            if point_in_3d_bounding_box(point, v_3d_box):
+                v_hits[v_id] = v_hits.get(v_id, 0) + 1
+                break
+
+    return v_hits
 
 
 def generate_3d_bbox(extent, location, angle):
@@ -149,7 +180,11 @@ def iterate_files(org_path: str, additional_path: str):
                 lidar_pose = yaml_utils.load_yaml(cav_yaml_file)['lidar_pose']
 
                 # calculate lidar hits per vehicle
-                calculate_lidar_hits(pcd, lidar_pose, vehicles)
+                vehicle_hits = calculate_lidar_hits(pcd, lidar_pose, vehicles)
+
+                # save vehicle hits in a file (TODO)
+
+                print(vehicle_hits)
                 
 
 
