@@ -1,5 +1,5 @@
-root_dir: '/data/public_datasets/OPV2V/original/train' # your original opv2v dataset
-output_dir: '/data/public_datasets/OPV2V/original/train_test/additional' # the new folder to save the dumped new data
+root_dir: '/data/public_datasets/OPV2V/original/test' # your original opv2v dataset
+output_dir: '/data/public_datasets/OPV2V/original/test/additional' # the new folder to save the dumped new data
 
 agent:
   activate: true # whether activate the agent module

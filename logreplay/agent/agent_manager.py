@@ -224,6 +224,8 @@ class AgentManager(object):
                 if value['actor_id'] == agent_id:
                     agent_id = veh_id
                     break
+
+            agent_id = int(agent_id)
             if 'vehicle' in agent.type_id:
                 vehicle_agents[agent_id] = self.format_agent_attributes(agent)
             elif 'walker' in agent.type_id:
