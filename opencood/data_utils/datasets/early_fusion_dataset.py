@@ -15,7 +15,7 @@ import torch
 import opencood.data_utils.datasets
 from opencood.utils import box_utils
 from opencood.data_utils.post_processor import build_postprocessor
-from opencood.data_utils.datasets import basedataset
+from opencood.data_utils.datasets import basedataset_old
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.utils.pcd_utils import \
     mask_points_by_range, mask_ego_points, shuffle_points, \
@@ -23,7 +23,7 @@ from opencood.utils.pcd_utils import \
 from opencood.utils.transformation_utils import x1_to_x2
 
 
-class EarlyFusionDataset(basedataset.BaseDataset):
+class EarlyFusionDataset(basedataset_old.BaseDataset):
     """
     This dataset is used for early fusion, where each CAV transmit the raw
     point cloud to the ego vehicle.

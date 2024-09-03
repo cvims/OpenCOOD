@@ -395,11 +395,14 @@ class SceneManager:
 
     def close(self):
         self.world.apply_settings(self.origin_settings)
+
+        self.sensor_destory()
+
         actor_list = self.world.get_actors()
         for actor in actor_list:
             actor.destroy()
+
         self.map_manager.destroy()
-        self.sensor_destory()
 
     def sensor_destory(self):
         for veh_id, veh_content in self.veh_dict.items():

@@ -106,3 +106,30 @@ def dist_to_continuous(p_dist, displacement_dist, res, downsample_rate):
     p_dist = p_dist + displacement_dist
     p_continuous = p_dist * res * downsample_rate
     return p_continuous
+
+
+def calculate_prev_pose_offset(cur_data, prev_data):
+        """
+        Calculate the transformation matrix from previous to current pose.
+
+        Parameters
+        ----------
+        cur_data : dict
+            Current data dictionary.
+
+        prev_data : dict
+            Previous data dictionary.
+
+        Returns
+        -------
+        prev_pose_offset : np.ndarray
+            Transformation matrix from previous to current pose.
+        """
+        if cur_data['prev_bev_exists']:
+            cur_pose = cur_data['params']['lidar_pose']
+            prev_pose = prev_data['params']['lidar_pose']
+            prev_pose_offset = x1_to_x2(prev_pose, cur_pose)
+        else:
+            prev_pose_offset = np.eye(4)
+
+        return prev_pose_offset

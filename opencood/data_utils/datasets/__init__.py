@@ -16,6 +16,7 @@ __all__ = {
 
 # the final range for evaluation
 GT_RANGE = [-140, -40, -3, 140, 40, 1]
+CAMERA_GT_RANGE = [-50, -50, -3, 50, 50, 1]
 # The communication range for cavs
 COM_RANGE = 70
 

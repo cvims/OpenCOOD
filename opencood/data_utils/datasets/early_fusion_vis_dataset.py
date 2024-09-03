@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 
 from opencood.utils import box_utils
 from opencood.data_utils.post_processor import build_postprocessor
-from opencood.data_utils.datasets import basedataset
+from opencood.data_utils.datasets import basedataset_old
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.hypes_yaml.yaml_utils import load_yaml
 from opencood.utils.pcd_utils import \
@@ -23,7 +23,7 @@ from opencood.utils.pcd_utils import \
 from opencood.utils.transformation_utils import x1_to_x2
 
 
-class EarlyFusionVisDataset(basedataset.BaseDataset):
+class EarlyFusionVisDataset(basedataset_old.BaseDataset):
     def __init__(self, params, visualize, train=True):
         super(EarlyFusionVisDataset, self).__init__(params, visualize, train)
         self.pre_processor = build_preprocessor(params['preprocess'],

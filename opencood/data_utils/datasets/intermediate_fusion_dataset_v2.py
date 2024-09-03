@@ -15,14 +15,14 @@ import torch
 import opencood.data_utils.datasets
 import opencood.data_utils.post_processor as post_processor
 from opencood.utils import box_utils
-from opencood.data_utils.datasets import basedataset
+from opencood.data_utils.datasets import basedataset_old
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.utils.pcd_utils import \
     mask_points_by_range, mask_ego_points, shuffle_points
 from opencood.utils.transformation_utils import x1_to_x2
 
 
-class IntermediateFusionDatasetV2(basedataset.BaseDataset):
+class IntermediateFusionDatasetV2(basedataset_old.BaseDataset):
     """
     This class is for intermediate fusion where each vehicle transmit the
     deep features to ego.
