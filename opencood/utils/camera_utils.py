@@ -41,8 +41,6 @@ def load_rgb_from_files(camera_list, camera_container=None):
             key = generate_key(scenario_folder, cav_id, timestamp, camera_name)
             if key in camera_container:
                 camera_dict[camera_name] = camera_container[key]
-                # print(scenario_folder, timestamp, cav_id, camera_name)
-                # print('found in container')
             else:
                 image = cv2.imread(camera_file)
                 camera_dict[camera_name] = image

@@ -6,10 +6,33 @@
 """
 Common utilities
 """
-
+import math
 import numpy as np
 import torch
 from shapely.geometry import Polygon
+
+
+def cav_distance_cal(selected_cav_base, ego_lidar_pose):
+    """
+    Calculate a certain cav's distance to the ego vehicle,
+
+    Parameters
+    ----------
+    selected_cav_base : dict
+    ego_lidar_pose : list
+
+    Returns
+    -------
+    The distance of this two vehicle (float);
+    """
+    distance = \
+        math.sqrt((selected_cav_base['params']['lidar_pose'][0] -
+                   ego_lidar_pose[0]) ** 2 + (
+                          selected_cav_base['params'][
+                              'lidar_pose'][1] - ego_lidar_pose[
+                              1]) ** 2)
+
+    return distance
 
 
 def check_numpy_to_torch(x):

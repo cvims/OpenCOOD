@@ -25,8 +25,10 @@ class BaseDataset(Dataset):
 
         self.pre_processor = None
         self.post_processor = None
-        self.data_augmentor = DataAugmentor(params['data_augment'],
-                                            train)
+        if 'data_augment' in params:
+            self.data_augmentor = DataAugmentor(params['data_augment'], train)
+        else:
+            self.data_augmentor = None
         
         # if 'queue_length' in params['fusion']['args']:
         #     self.queue_length = max(1, params['fusion']['args']['queue_length'])
@@ -229,40 +231,9 @@ class BaseDataset(Dataset):
         timestamp_key : str
             The timestamp key saved in the cav dictionary.
         """
-        # get all timestamp keys
-        timestamp_keys = list(scenario_database.items())[0][1]
-        # retrieve the correct index
-        timestamp_key = list(timestamp_keys.items())[timestamp_index][0]
+        timestamp_key = list(next(iter(scenario_database.values())).keys())[timestamp_index]
 
         return timestamp_key
-
-
-    def calc_dist_to_ego(self, scenario_database, timestamp_key):
-        """
-        Calculate the distance to ego for each cav.
-        """
-        ego_lidar_pose = None
-        ego_cav_content = None
-        # Find ego pose first
-        for cav_id, cav_content in scenario_database.items():
-            if cav_content['ego']:
-                ego_cav_content = cav_content
-                ego_lidar_pose = cav_content[timestamp_key]['yaml']['lidar_pose']
-                break
-
-        assert ego_lidar_pose is not None
-
-        # calculate the distance
-        for cav_id, cav_content in scenario_database.items():
-            cur_lidar_pose = cav_content[timestamp_key]['yaml']['lidar_pose']
-            distance = \
-                math.sqrt((cur_lidar_pose[0] -
-                           ego_lidar_pose[0]) ** 2 +
-                          (cur_lidar_pose[1] - ego_lidar_pose[1]) ** 2)
-            cav_content['distance_to_ego'] = distance
-            scenario_database.update({cav_id: cav_content})
-
-        return ego_cav_content
 
 
     def time_delay_calculation(self, ego_flag):
@@ -455,8 +426,7 @@ class BaseDataset(Dataset):
         timestamp_key = self.return_timestamp_key(scenario_database,
                                                   timestamp_index)
         # calculate distance to ego for each cav for time delay estimation
-        ego_cav_content = \
-            self.calc_dist_to_ego(scenario_database, timestamp_key)
+        ego_cav_content = [cav_content for cav_content in scenario_database.values() if cav_content['ego']][0]
     
         data = OrderedDict()
         # load files for all CAVs

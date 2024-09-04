@@ -40,4 +40,3 @@ if __name__ == '__main__':
     all_yamls = pickle.load(open(os.path.join(root_dir, 'yamls.pkl'), 'rb'))
 
     load_images_into_ram(root_dir, all_yamls)
-
