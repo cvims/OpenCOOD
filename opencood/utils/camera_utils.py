@@ -1,6 +1,8 @@
 """
 Utility functions related to rgb camera
 """
+import os
+import concurrent.futures
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -284,3 +286,58 @@ def plot_all_agents(draw_image_list, cav_id):
                                             cv2.COLOR_RGB2BGR))
             axarr[i, j].set_title('agent_%s, camera%d' % (cav_id[i], j))
     plt.show()
+
+
+# Function to load images from paths
+def load_images_from_path(cam_paths):
+    images = {}
+    for cam_pth, name in cam_paths:
+        image = cv2.imread(cam_pth)
+        if image is not None:
+            key = generate_image_key_from_path(cam_pth)
+            images[key] = image
+        else:
+            print(f"Warning: {cam_pth} could not be loaded.")
+    return images
+
+
+# Helper function to generate key from path
+def generate_image_key_from_path(path):
+    parts = path.split('/')
+    folder = parts[-3]
+    cav_id = parts[-2]
+    timestamp = parts[-1].split('_')[0]
+    name = parts[-1].split('_')[-1].replace('.png', '')
+    return generate_image_key(folder, cav_id, timestamp, name)
+
+
+# Main function to load images into a container
+def load_images_into_container(root_dir, all_yamls):
+    all_images = {}
+
+    def prepare_paths(folder, cav_id, timestamp):
+        paths = []
+        base_path = os.path.join(root_dir, folder, str(cav_id))
+        for cam_idx in range(4):
+            cam_pth = os.path.join(base_path, f'{timestamp}_camera{cam_idx}.png')
+            paths.append((cam_pth, f'camera{cam_idx}'))
+        return paths
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        for folder in all_yamls:
+            full_path = os.path.join(root_dir, folder)
+            for cav_id in all_yamls[folder]:
+                for timestamp in all_yamls[folder][cav_id]:
+                    cam_paths = prepare_paths(folder, cav_id, timestamp)
+                    futures.append(executor.submit(load_images_from_path, cam_paths))
+
+        for future in concurrent.futures.as_completed(futures):
+            images = future.result()
+            all_images.update(images)
+
+    return all_images
+
+
+def generate_image_key(scenario_folder, cav_id, timestamp, camera_name):
+    return f"{scenario_folder}:{cav_id}:{timestamp}:{camera_name}"

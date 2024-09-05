@@ -11,14 +11,37 @@ import numpy as np
 import torch
 from shapely.geometry import Polygon
 
+from opencood.utils.bev_creation import transform_vehicle_to_ego_2d
 
-def cav_distance_cal(selected_cav_base, ego_lidar_pose):
+
+def vehicle_in_bev_range(ego_loc, vehicle_transformation_data, bev_height, bev_width):
+    """
+    Check if the vehicle is in the bev range.
+    :param ego_loc: ego vehicle location
+    :param vehicle_transformation_data: vehicle transformation data
+    :param bev_height: height of bev image in meters
+    :param bev_width: width of bev image in meters
+    """
+    veh_loc = vehicle_transformation_data['location']
+    veh_angle = vehicle_transformation_data['angle']
+    veh_extent = vehicle_transformation_data['extent']
+
+    rotated_veh_to_ego = transform_vehicle_to_ego_2d(veh_loc, veh_angle, veh_extent, ego_loc)
+
+    if np.all(np.abs(rotated_veh_to_ego[:, 0]) > bev_width / 2) or \
+            np.all(np.abs(rotated_veh_to_ego[:, 1]) > bev_height / 2):
+        return False
+
+    return True
+
+
+def cav_distance_cal(cav_lidar_pose, ego_lidar_pose):
     """
     Calculate a certain cav's distance to the ego vehicle,
 
     Parameters
     ----------
-    selected_cav_base : dict
+    cav_lidar_pose : list
     ego_lidar_pose : list
 
     Returns
@@ -26,10 +49,9 @@ def cav_distance_cal(selected_cav_base, ego_lidar_pose):
     The distance of this two vehicle (float);
     """
     distance = \
-        math.sqrt((selected_cav_base['params']['lidar_pose'][0] -
+        math.sqrt((cav_lidar_pose[0] -
                    ego_lidar_pose[0]) ** 2 + (
-                          selected_cav_base['params'][
-                              'lidar_pose'][1] - ego_lidar_pose[
+                          cav_lidar_pose[1] - ego_lidar_pose[
                               1]) ** 2)
 
     return distance

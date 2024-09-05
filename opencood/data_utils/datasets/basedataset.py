@@ -1,19 +1,17 @@
 import os
-import math
 from collections import OrderedDict
 
-import torch
 import numpy as np
 from torch.utils.data import Dataset
 import pickle
 import random
 
-import opencood.utils.pcd_utils as pcd_utils
 from opencood.data_utils.augmentor.data_augmentor import DataAugmentor
-from opencood.utils.pcd_utils import downsample_lidar_minimum
 from opencood.utils.transformation_utils import x1_to_x2
 from opencood.hypes_yaml.yaml_utils import load_yaml
-from opencood.utils.camera_utils import load_rgb_from_files
+from opencood.data_utils.datasets import COM_RANGE
+from opencood.utils import common_utils
+from opencood.utils.temporal_utils import VISIBLITY_CATEGORY_ENUM, categorize_vehicle_visibility_by_camera_props, categorize_vehicle_visibility_by_lidar_hits
 
 
 class BaseDataset(Dataset):
@@ -29,23 +27,6 @@ class BaseDataset(Dataset):
             self.data_augmentor = DataAugmentor(params['data_augment'], train)
         else:
             self.data_augmentor = None
-        
-        # if 'queue_length' in params['fusion']['args']:
-        #     self.queue_length = max(1, params['fusion']['args']['queue_length'])
-        # else:
-        #     self.queue_length = 1
-        
-        # if 'timestamp_offset' in params['fusion']['args']:
-        #     self.timestamp_offset = max(0, params['fusion']['args']['timestamp_offset'])
-        # else:
-        #     self.timestamp_offset = 0
-        
-        # if 'timestamp_offset_mean' in params['fusion']['args']:
-        #     self.timestamp_offset_mean = params['fusion']['args']['timestamp_offset_mean']
-        #     self.timestamp_offset_std = params['fusion']['args']['timestamp_offset_std']
-        # else:
-        #     self.timestamp_offset_mean = 0
-        #     self.timestamp_offset_std = 0
 
         if 'wild_setting' in params:
             self.seed = params['wild_setting']['seed']
@@ -90,10 +71,18 @@ class BaseDataset(Dataset):
         else:
             self.max_cav = params['train_params']['max_cav']
         
-        self.all_yamls = pickle.load(open(os.path.join(self.root_dir, 'yamls.pkl'), 'rb'))
+        self.all_yamls = pickle.load(open(os.path.join(self.root_dir, 'additional', 'yamls.pkl'), 'rb'))
 
         # init scenario folders
         self.scenario_folders = sorted(list(self.all_yamls.keys()))
+
+        detection_criteria = params['detection_criteria']
+        self.camera_detection_criteria = detection_criteria['camera']
+        self.camera_detection_criteria_threshold = VISIBLITY_CATEGORY_ENUM[self.camera_detection_criteria['detection_criteria_threshold']]
+        self.camera_dection_criteria_config = self.camera_detection_criteria['config']
+        self.lidar_detection_criteria = detection_criteria['lidar']
+        self.lidar_detection_criteria_threshold = VISIBLITY_CATEGORY_ENUM[self.lidar_detection_criteria['detection_criteria_threshold']]
+        self.lidar_detection_criteria_config = self.lidar_detection_criteria['config']
 
         self.reinitialize()
 
@@ -119,6 +108,7 @@ class BaseDataset(Dataset):
             if int(cav_list[0]) < 0:
                 cav_list = cav_list[1:] + [cav_list[0]]
 
+            ego_id = cav_list[0]
             # loop over all CAV data
             for (j, cav_id) in enumerate(cav_list):
                 if j > self.max_cav - 1:
@@ -130,11 +120,24 @@ class BaseDataset(Dataset):
 
                 cav_path = os.path.join(self.root_dir, scenario_folder, str(cav_id))
                 for timestamp in timestamps:
+                    ego_lidar_pose = self.all_yamls[scenario_folder][ego_id][timestamp]['lidar_pose']
+                    cav_lidar_pose = self.all_yamls[scenario_folder][cav_id][timestamp]['lidar_pose']
+                    # check if the cav is within the communication range with ego
+                    distance = common_utils.cav_distance_cal(cav_lidar_pose, ego_lidar_pose)
+
+                    if distance > COM_RANGE:
+                        continue
+
                     self.scenario_database[i][cav_id][timestamp] = OrderedDict()
 
                     self.scenario_database[i][cav_id][timestamp]['yaml'] = self.all_yamls[scenario_folder][cav_id][timestamp]
                     self.scenario_database[i][cav_id][timestamp]['lidar'] = os.path.join(cav_path, f'{timestamp}.pcd')
                     self.scenario_database[i][cav_id][timestamp]['cameras'] = self.load_camera_files(cav_path, timestamp)
+
+                    # update the vehicles with the visibility categoryv
+                    vehicles = self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles']
+                    self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles'] = categorize_vehicle_visibility_by_camera_props(vehicles, self.camera_dection_criteria_config)
+                    self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles'] = categorize_vehicle_visibility_by_lidar_hits(vehicles, self.lidar_detection_criteria_config)
 
                 if j == 0:
                     self.scenario_database[i][cav_id]['ego'] = True
@@ -459,13 +462,6 @@ class BaseDataset(Dataset):
                                                              timestamp_key,
                                                              timestamp_key_delay,
                                                              cur_ego_pose_flag)
-        
-            # data[cav_id]['lidar_np'] = \
-            #     pcd_utils.pcd_to_np(cav_content[timestamp_key_delay]['lidar'])
-
-            data[cav_id]['camera_np'] = \
-                load_rgb_from_files(
-                    cav_content[timestamp_key_delay]['cameras'])
         
         return data
 

@@ -6,9 +6,7 @@ from collections import OrderedDict
 import numpy as np
 import torch
 
-import opencood
 from opencood.data_utils.datasets.camera import base_camera_dataset
-from opencood.utils import common_utils
 
 
 class CamIntermediateFusionDataset(base_camera_dataset.BaseCameraDataset):
@@ -60,11 +58,6 @@ class CamIntermediateFusionDataset(base_camera_dataset.BaseCameraDataset):
 
         # loop over all CAVs to process information
         for cav_id, selected_cav_base in data_sample.items():
-            distance = common_utils.cav_distance_cal(selected_cav_base,
-                                                     ego_lidar_pose)
-            if distance > opencood.data_utils.datasets.COM_RANGE:
-                continue
-
             selected_cav_processed = \
                 self.get_single_cav(selected_cav_base)
 

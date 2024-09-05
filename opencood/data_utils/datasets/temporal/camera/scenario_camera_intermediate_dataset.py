@@ -6,38 +6,10 @@ from collections import OrderedDict
 import numpy as np
 import torch
 
+from opencood.utils.common_utils import vehicle_in_bev_range
+from opencood.utils.temporal_utils import filter_vehicles_by_category, update_temporal_vehicles_list
 from opencood.data_utils.datasets.temporal.camera.base_scenario_camera_dataset import BaseScenarioCameraDataset
 from opencood.utils.bev_creation import create_bev
-
-
-DETECTION_CRITERIA_RANKING = dict(
-    easy=0,
-    moderate=1,
-    hard=2,
-    very_hard=3,
-    dontcare=4,
-    none=5
-)
-
-
-def get_detection_criteria_rank(type: str):
-    if type is None:
-        type = 'none'
-    else:
-        type = type.lower()
-    
-    return DETECTION_CRITERIA_RANKING[type]
-
-
-def get_hightest_detection_criteria_rank(detection_criteria: dict):
-    highest_rank = 5
-    for sensor_name in detection_criteria:
-        criteria = detection_criteria[sensor_name]
-        rank = get_detection_criteria_rank(criteria)
-        if rank < highest_rank:
-            highest_rank = rank
-    
-    return highest_rank
 
 
 class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
@@ -62,12 +34,6 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
 
         # TODO augmentation
 
-        if 'minimum_detection_criteria' in params['fusion']['args']:
-            self.minimum_detection_criteria = get_detection_criteria_rank(params['fusion']['args']['minimum_detection_criteria'])
-        else:
-            self.minimum_detection_criteria = get_detection_criteria_rank('very_hard')
-
-
     def __getitem__(self, idx):
         scenario_samples = self.get_sample_random(idx)
 
@@ -75,11 +41,7 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
 
         prev_ego_id = -999
 
-        # all objects before scenario_samples - 1
-        # to filter objects that were never observed before
-        observed_objects_before_gt = set()
-
-        all_detected_temporal_vehicles = []
+        all_in_range_vehicles = []
 
         for s_idx, data_sample in enumerate(scenario_samples):
             processed_data_dict = OrderedDict()
@@ -87,6 +49,8 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
 
             ego_id = -999
             ego_lidar_pose = []
+            ego_loc = []
+            ego_vehicles = None
 
             # first find the ego vehicle's lidar pose
             for cav_id, ego_content in data_sample.items():
@@ -98,6 +62,8 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
                         print('Attention: Ego vehicle changed in the same scenario.')
                     prev_ego_id = ego_id
                     ego_lidar_pose = ego_content['params']['lidar_pose']
+                    ego_loc = ego_content['params']['true_ego_pos']
+                    ego_vehicles = ego_content['vehicles']
                     break
             assert cav_id == list(data_sample.keys())[
                 0], "The first element in the OrderedDict must be ego"
@@ -107,6 +73,13 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
             pairwise_t_matrix = \
                 self.get_pairwise_transformation(data_sample,
                                                 self.params['train_params']['max_cav'])
+        
+            # save all detected vehicles. We can use the ego because the yaml already contains all vehicles of the map.
+            in_range_vehicles = {}
+            for v_id in ego_vehicles:
+                if vehicle_in_bev_range(ego_loc, ego_vehicles[v_id], self.bev_width, self.bev_height):
+                    in_range_vehicles[v_id] = ego_vehicles[v_id]
+            all_in_range_vehicles.append(in_range_vehicles)
 
             # Final shape: (L, M, H, W, 3)
             camera_data = []
@@ -126,14 +99,8 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
 
             prev_pose_offsets = []
 
-            # save all detected vehicles
-            cav_all_detected_vehicles = []
-
             # loop over all CAVs to process information
             for cav_id, selected_cav_base in data_sample.items():
-                # add all detected vehicles to the list (also vehicles detected by ego)
-                cav_all_detected_vehicles.append(selected_cav_base['vehicles'])
-
                 cav_id_before = cav_id
                 # cav augmentation methods
                 # cav_id, ego_content, selected_cav_base = self.cav_augmentor(ego_id, cav_id, ego_content, selected_cav_base, idx, s_idx)
@@ -149,9 +116,6 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
                     selected_cav_processed = \
                         self.get_single_cav(selected_cav_base)
                 else:
-                    # add to observed objects
-                    for obj_id in selected_cav_base['object_id']:
-                        observed_objects_before_gt.add(obj_id)
                     selected_cav_processed = \
                         self.get_single_cav(selected_cav_base)
 
@@ -196,13 +160,11 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
                 'cav_ids': cav_ids,
                 'prev_pose_offsets': prev_pose_offsets,
                 'ego_id': int(ego_id),
-                'vehicles': cav_all_detected_vehicles
+                'vehicles': in_range_vehicles
             })
 
-            all_detected_temporal_vehicles.append(cav_all_detected_vehicles)
-
             temporal_dynamic_gt, detected_vehicles, full_temporal_gt, full_detected_vehicles = self.create_temporal_gt(
-                all_detected_temporal_vehicles, ego_content['true_ego_pos'], int(ego_id)
+                all_in_range_vehicles, ego_content['true_ego_pos'], int(ego_id)
             )
 
             # expand dim 0
@@ -224,28 +186,28 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
         return scenario_processed
 
 
-    def create_temporal_gt(self, vehicles, ego_pos, ego_id, minimum_detection_criteria=None):
-        # TODO depending on camera attributes
-
+    def create_temporal_gt(self, vehicles, ego_pos, ego_id):
         # find all detected vehicles of all given vehicles lists (strategy?)
         # When is a vehicle considered visible?
+        category_filtered_vehicles = [filter_vehicles_by_category(vehicle_list, self.camera_detection_criteria_threshold, True) for vehicle_list in vehicles]
+
+        temporal_vehicles_list = update_temporal_vehicles_list(vehicles, category_filtered_vehicles)
         
         # we use the data from the latest frame list to build the ground truth
-        gt_vehicles = dict()
+        temporal_visible_gt_vehicles = dict()
         all_gt_vehicles = dict()
-        for cav_vehicle in vehicles[-1]:
-            for v_id, v_data in cav_vehicle.items():
-                if v_id == ego_id:
-                    # Ignore ego vehicle
-                    continue
-            
-                v_data['detection_criteria'] = 'moderate'
-                gt_vehicles[v_id] = v_data
+        for veh_id, v_data in vehicles[-1].items():
+            if veh_id == ego_id:
+                # Ignore ego vehicle
+                continue
 
-                all_gt_vehicles[v_id] = v_data
+            if veh_id in temporal_vehicles_list[-1]:
+                temporal_visible_gt_vehicles[veh_id] = v_data
 
-        temporal_gt, visible_vehicles = create_bev(
-            vehicles=gt_vehicles,
+            all_gt_vehicles[veh_id] = v_data
+
+        temporal_gt, _ = create_bev(
+            vehicles=temporal_visible_gt_vehicles,
             t_ego_pos=ego_pos,
             bev_image_size=self.bev_image_size,
             bev_width=self.bev_width,
@@ -253,10 +215,10 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
         )
 
         # only keep visible vehicles
-        gt_vehicles = {k: v for k, v in gt_vehicles.items() if k in visible_vehicles}
+        temporal_visible_gt_vehicles = {k: v for k, v in temporal_visible_gt_vehicles.items()}
 
-        full_temporal_gt, visible_vehicles = create_bev(
-            vehicles=all_gt_vehicles,
+        full_temporal_gt, _ = create_bev(
+            vehicles=all_gt_vehicles,  # all vehicles in the last frame (except ego)
             t_ego_pos=ego_pos,
             bev_image_size=self.bev_image_size,
             bev_width=self.bev_width,
@@ -264,9 +226,9 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
         )
 
         # only keep visible vehicles
-        all_gt_vehicles = {k: v for k, v in all_gt_vehicles.items() if k in visible_vehicles}
+        all_gt_vehicles = {k: v for k, v in all_gt_vehicles.items()}
 
-        return temporal_gt, gt_vehicles, full_temporal_gt, all_gt_vehicles
+        return temporal_gt, temporal_visible_gt_vehicles, full_temporal_gt, all_gt_vehicles
 
     @staticmethod
     def get_pairwise_transformation(base_data_dict, max_cav):
@@ -400,10 +362,21 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
         cam_extrinsic_self_all_batch = []
         cam_intrinsic_all_batch = []
 
+        all_vehicles_all_batch = []
+
         gt_static_all_batch = []
-        gt_dynamic_all_batch = []
-        gt_dynamic_full_view_all_batch = []
-        gt_dynamic_all_batch_non_corp = []
+        # gt_dynamic_all_batch = []
+        # gt_dynamic_full_view_all_batch = []
+        # gt_dynamic_all_batch_non_corp = []
+        gt_temporal_all_batch = []
+        detected_vehicles_all_batch = []
+        detected_vehicles_dict_all_batch = []
+
+        full_gt_temporal_all_batch = []
+        full_detected_vehicles_all_batch = []
+        full_detected_vehicles_dict_all_batch = []
+
+        true_ego_pos_all_batch = []
 
         transformation_matrix_all_batch = []
         pairwise_t_matrix_all_batch = []
@@ -414,6 +387,10 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
 
         vehicles_offsets_batch = []
 
+        ego_vehicle_offsets_batch = []
+
+        ego_id_all_batch = []
+
         for i in range(len(batch)):
             scenarios = batch[i]
 
@@ -423,9 +400,20 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
             cam_intrinsic_all_scenario = []
 
             gt_static_all_scenario = []
-            gt_dynamic_all_scenario = []
-            gt_dynamic_full_view_all_scenario = []
-            gt_dynamic_all_scenario_non_corp = []
+            # gt_dynamic_all_scenario = []
+            # gt_dynamic_full_view_all_scenario = []
+            # gt_dynamic_all_scenario_non_corp = []
+            gt_temporal_all_scenario = []
+            detected_vehicles_all_scenario = []
+            detected_vehicles_dict_all_scenario = []
+
+            full_gt_temporal_all_scenario = []
+            full_detected_vehicles_all_scenario = []
+            full_detected_vehicles_dict_all_scenario = []
+
+            true_ego_pos_all_scenario = []
+
+            all_vehicles_all_scenario = []
 
             transformation_matrix_all_scenario = []
             pairwise_t_matrix_all_scenario = []
@@ -434,7 +422,11 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
 
             cav_ids_scenario = []
 
+            ego_id_scenario = []
+
             vehicle_offsets_scenario = []
+
+            ego_vehicle_offsets_scenario = []
             
             for i, scenario in enumerate(scenarios):
                 ego_dict = scenario['ego']
@@ -444,6 +436,11 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
                 camera_intrinsic = ego_dict['camera_intrinsic']
                 camera_extrinsic = ego_dict['camera_extrinsic']
                 camera_extrinsic_self = ego_dict['camera_extrinsic_self']
+
+                detected_vehicles = ego_dict['detected_vehicles']
+                full_detected_vehicles = ego_dict['full_detected_vehicles']
+
+                all_vehicles = ego_dict['vehicles']
 
                 assert camera_data.shape[0] == \
                     camera_intrinsic.shape[0] == \
@@ -456,11 +453,22 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
                 cam_to_ego_all_scenario.append(torch.from_numpy(camera_extrinsic).unsqueeze(1).float())
                 cam_extrinsic_self_all_scenario.append(torch.from_numpy(camera_extrinsic_self).unsqueeze(1).float())
 
+                detected_vehicles_all_scenario.append(detected_vehicles)
+                detected_vehicles_dict_all_scenario.append(ego_dict['detected_vehicles_dict'])
+                full_detected_vehicles_all_scenario.append(full_detected_vehicles)
+                full_detected_vehicles_dict_all_scenario.append(ego_dict['full_detected_vehicles_dict'])
+                all_vehicles_all_scenario.append(all_vehicles)
+                ego_id_scenario.append(ego_dict['ego_id'])
+
+                true_ego_pos_all_scenario.append(torch.from_numpy(ego_dict['true_ego_pos']).float())
+
                 # ground truth
                 gt_static_all_scenario.append(torch.from_numpy(ego_dict['gt_static']).long())
-                gt_dynamic_all_scenario.append(torch.from_numpy(ego_dict['gt_dynamic']).long())
-                gt_dynamic_full_view_all_scenario.append(torch.from_numpy(ego_dict['gt_dynamic_full_view']).long())
-                gt_dynamic_all_scenario_non_corp.append(torch.from_numpy(ego_dict['gt_dynamic_non_corp']).long())
+                gt_temporal_all_scenario.append(torch.from_numpy(ego_dict['temporal_gt']).long())
+                full_gt_temporal_all_scenario.append(torch.from_numpy(ego_dict['full_temporal_gt']).long())
+                # gt_dynamic_all_scenario.append(torch.from_numpy(ego_dict['gt_dynamic']).long())
+                # gt_dynamic_full_view_all_scenario.append(torch.from_numpy(ego_dict['gt_dynamic_full_view']).long())
+                # gt_dynamic_all_scenario_non_corp.append(torch.from_numpy(ego_dict['gt_dynamic_non_corp']).long())
 
                 # transformation matrix
                 transformation_matrix_all_scenario.append(
@@ -476,17 +484,30 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
                         for i, cav_id in enumerate(cav_ids)
                     }
                 )
+
+                ego_vehicle_offsets_scenario.append(torch.from_numpy(ego_dict['prev_pose_offsets'][0]).float())
         
             # append all scenarios to all batch lists
             cam_rgb_all_batch.append(cam_rgb_all_scenario)
             cam_intrinsic_all_batch.append(cam_intrinsic_all_scenario)
             cam_to_ego_all_batch.append(cam_to_ego_all_scenario)
             cam_extrinsic_self_all_batch.append(cam_extrinsic_self_all_scenario)
+
+            detected_vehicles_all_batch.append(detected_vehicles_all_scenario)
+            detected_vehicles_dict_all_batch.append(detected_vehicles_dict_all_scenario)
+            full_detected_vehicles_all_batch.append(full_detected_vehicles_all_scenario)
+            full_detected_vehicles_dict_all_batch.append(full_detected_vehicles_dict_all_scenario)
+            all_vehicles_all_batch.append(all_vehicles_all_scenario)
+            ego_id_all_batch.append(ego_id_scenario)
+
+            true_ego_pos_all_batch.append(true_ego_pos_all_scenario)
             
             gt_static_all_batch.append(gt_static_all_scenario)
-            gt_dynamic_all_batch.append(gt_dynamic_all_scenario)
-            gt_dynamic_full_view_all_batch.append(gt_dynamic_full_view_all_scenario)
-            gt_dynamic_all_batch_non_corp.append(gt_dynamic_all_scenario_non_corp)
+            gt_temporal_all_batch.append(gt_temporal_all_scenario)
+            full_gt_temporal_all_batch.append(full_gt_temporal_all_scenario)
+            # gt_dynamic_all_batch.append(gt_dynamic_all_scenario)
+            # gt_dynamic_full_view_all_batch.append(gt_dynamic_full_view_all_scenario)
+            # gt_dynamic_all_batch_non_corp.append(gt_dynamic_all_scenario_non_corp)
 
             transformation_matrix_all_batch.append(transformation_matrix_all_scenario)
             pairwise_t_matrix_all_batch.append(pairwise_t_matrix_all_scenario)
@@ -494,6 +515,7 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
 
             cav_ids_batch.append(cav_ids_scenario)
             vehicles_offsets_batch.append(vehicle_offsets_scenario)
+            ego_vehicle_offsets_batch.append(ego_vehicle_offsets_scenario)
 
         # vehicle_location_offsets_batch = self.calculate_vehicle_offsets(cam_extrinsic_self_all_batch, cav_ids_batch)
 
@@ -517,22 +539,33 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
         record_len = [torch.stack(record_len_scenario, dim=0) for record_len_scenario in record_len]
         # same with vehicle offsets
         vehicles_offsets_batch = list(map(list, zip(*vehicles_offsets_batch)))
+        # same with ego vehicle offsets
+        ego_vehicle_offsets_batch = list(map(list, zip(*ego_vehicle_offsets_batch)))
         # same with gt static
         gt_static_all_batch = list(map(list, zip(*gt_static_all_batch)))
         # stack gt static
         gt_static_all_batch = [torch.stack(gt_static_all_scenario) for gt_static_all_scenario in gt_static_all_batch]
-        # same with gt dynamic
-        gt_dynamic_all_batch = list(map(list, zip(*gt_dynamic_all_batch)))
-        # stack gt dynamic
-        gt_dynamic_all_batch = [torch.stack(gt_dynamic_all_scenario) for gt_dynamic_all_scenario in gt_dynamic_all_batch]
-        # same with gt dynamic full view
-        gt_dynamic_full_view_all_batch = list(map(list, zip(*gt_dynamic_full_view_all_batch)))
-        # stack gt dynamic full view
-        gt_dynamic_full_view_all_batch = [torch.stack(gt_dynamic_all_scenario) for gt_dynamic_all_scenario in gt_dynamic_full_view_all_batch]
-        # same with gt dynamic non corp
-        gt_dynamic_all_batch_non_corp = list(map(list, zip(*gt_dynamic_all_batch_non_corp)))
-        # stack gt dynamic non corp
-        gt_dynamic_all_batch_non_corp = [torch.stack(gt_dynamic_all_scenario) for gt_dynamic_all_scenario in gt_dynamic_all_batch_non_corp]
+        # same with gt temporal
+        gt_temporal_all_batch = list(map(list, zip(*gt_temporal_all_batch)))
+        # stack gt temporal
+        gt_temporal_all_batch = [torch.stack(gt_temporal_all_scenario) for gt_temporal_all_scenario in gt_temporal_all_batch]
+        # same with full gt
+        full_gt_temporal_all_batch = list(map(list, zip(*full_gt_temporal_all_batch)))
+        # stack full gt
+        full_gt_temporal_all_batch = [torch.stack(full_gt_temporal_all_scenario) for full_gt_temporal_all_scenario in full_gt_temporal_all_batch]
+
+        # # same with gt dynamic
+        # gt_dynamic_all_batch = list(map(list, zip(*gt_dynamic_all_batch)))
+        # # stack gt dynamic
+        # gt_dynamic_all_batch = [torch.stack(gt_dynamic_all_scenario) for gt_dynamic_all_scenario in gt_dynamic_all_batch]
+        # # same with gt dynamic full view
+        # gt_dynamic_full_view_all_batch = list(map(list, zip(*gt_dynamic_full_view_all_batch)))
+        # # stack gt dynamic full view
+        # gt_dynamic_full_view_all_batch = [torch.stack(gt_dynamic_all_scenario) for gt_dynamic_all_scenario in gt_dynamic_full_view_all_batch]
+        # # same with gt dynamic non corp
+        # gt_dynamic_all_batch_non_corp = list(map(list, zip(*gt_dynamic_all_batch_non_corp)))
+        # # stack gt dynamic non corp
+        # gt_dynamic_all_batch_non_corp = [torch.stack(gt_dynamic_all_scenario) for gt_dynamic_all_scenario in gt_dynamic_all_batch_non_corp]
         # same with transformation matrix
         transformation_matrix_all_batch = list(map(list, zip(*transformation_matrix_all_batch)))
         # stack transformation matrix
@@ -541,8 +574,23 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
         pairwise_t_matrix_all_batch = list(map(list, zip(*pairwise_t_matrix_all_batch)))
         # stack pairwise matrix
         pairwise_t_matrix_all_batch = [torch.stack(pairwise_t_matrix_all_scenario) for pairwise_t_matrix_all_scenario in pairwise_t_matrix_all_batch]
+
+
         # same with cav ids
         cav_ids_batch = list(map(list, zip(*cav_ids_batch)))
+        detected_vehicles_all_batch = list(map(list, zip(*detected_vehicles_all_batch)))
+        detected_vehicles_dict_all_batch = list(map(list, zip(*detected_vehicles_dict_all_batch)))
+        full_detected_vehicles_all_batch = list(map(list, zip(*full_detected_vehicles_all_batch)))
+        full_detected_vehicles_dict_all_batch = list(map(list, zip(*full_detected_vehicles_dict_all_batch)))
+
+        # same with ego id
+        ego_id_all_batch = list(map(list, zip(*ego_id_all_batch)))
+
+        # same with true ego pos
+        true_ego_pos_all_batch = list(map(list, zip(*true_ego_pos_all_batch)))
+        true_ego_pos_all_batch = [torch.stack(true_ego_pos_all_scenario) for true_ego_pos_all_scenario in true_ego_pos_all_batch]
+
+        all_vehicles_all_batch = list(map(list, zip(*all_vehicles_all_batch)))
 
 
         # convert numpy arrays to torch tensor
@@ -551,14 +599,24 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
             'extrinsic': cam_to_ego_all_batch,
             'intrinsic': cam_intrinsic_all_batch,
             'vehicle_offsets': vehicles_offsets_batch,
+            'ego_vehicle_offsets': ego_vehicle_offsets_batch,
             'gt_static': gt_static_all_batch,
-            'gt_dynamic': gt_dynamic_all_batch,
-            'gt_dynamic_full_view': gt_dynamic_full_view_all_batch,
-            'gt_dynamic_non_corp': gt_dynamic_all_batch_non_corp,
+            'gt_dynamic': gt_temporal_all_batch,
+            'full_gt_dynamic': full_gt_temporal_all_batch,
+            # 'gt_dynamic': gt_dynamic_all_batch,
+            # 'gt_dynamic_full_view': gt_dynamic_full_view_all_batch,
+            # 'gt_dynamic_non_corp': gt_dynamic_all_batch_non_corp,
+            'detected_vehicles': detected_vehicles_all_batch,
+            'detected_vehicles_dict': detected_vehicles_dict_all_batch,
+            'full_detected_vehicles': full_detected_vehicles_all_batch,
+            'full_detected_vehicles_dict': full_detected_vehicles_dict_all_batch,
             'transformation_matrix': transformation_matrix_all_batch,
             'pairwise_t_matrix': pairwise_t_matrix_all_batch,
             'record_len': record_len,
-            'cav_ids': cav_ids_batch
+            'cav_ids': cav_ids_batch,
+            'ego_id': ego_id_all_batch,
+            'vehicles': all_vehicles_all_batch,
+            'true_ego_pos': true_ego_pos_all_batch
         }
 
     def post_process(self, batch_dict, output_dict):
@@ -576,5 +634,5 @@ if __name__ == '__main__':
 
     dataset = CamScenarioIntermediateFusionDataset(params, visualize=False, train=True, validate=False)
 
-    test = dataset.__getitem__(0)
-    test = dataset.collate_batch(test)
+    test = dataset.__getitem__(200)
+    test = dataset.collate_batch([test])

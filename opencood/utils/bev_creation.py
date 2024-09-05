@@ -7,15 +7,14 @@ import cv2
 import torch
 
 
+def transform_vehicle_to_ego_2d(v_loc, v_angles, v_extent, ego_pos):
+    ego_y, ego_x, ego_yaw = ego_pos[0], ego_pos[1], ego_pos[4]
+    ego_yaw = np.radians(ego_yaw)
 
-def create_vehicle_box(v_loc, v_angles, v_extent, ego_pos, max_distance):
-    ego_y, ego_x, ego_z, ego_pitch, ego_yaw, ego_roll = ego_pos[:]
-    ego_pitch, ego_yaw, ego_roll = np.radians(ego_pitch), np.radians(ego_yaw), np.radians(ego_roll)
-
-    v_y, v_x, v_z = v_loc[:]  # center positions
-    v_pitch, v_yaw, v_roll = v_angles[:]
-    v_pitch, v_yaw, v_roll = np.radians(v_pitch), np.radians(-v_yaw), np.radians(v_roll)
-    v_extent_x, v_extent_y, v_extent_z = v_extent[:]
+    v_y, v_x = v_loc[:2]  # center positions
+    v_yaw = v_angles[1]
+    v_yaw = np.radians(-v_yaw)
+    v_extent_x, v_extent_y = v_extent[:2]
 
     vehicle_vertices = np.array([
         [v_extent_y, v_extent_x],
@@ -44,10 +43,13 @@ def create_vehicle_box(v_loc, v_angles, v_extent, ego_pos, max_distance):
     # rotate the vehicle vertices
     rotated_vehicle_vertices_ego = np.dot(translated_vehicle_vertices - np.array([ego_x, ego_y]), ego_R.T)
 
-    # # if none of the vertices are in the ego frame [-+ max_distance], return None
-    # if np.all(rotated_vehicle_vertices_ego[:, 0] < -max_distance) or np.all(rotated_vehicle_vertices_ego[:, 0] > max_distance) or \
-    #         np.all(rotated_vehicle_vertices_ego[:, 1] < -max_distance) or np.all(rotated_vehicle_vertices_ego[:, 1] > max_distance):
-    #     return None
+    return rotated_vehicle_vertices_ego
+
+
+def create_vehicle_box(v_loc, v_angles, v_extent, ego_pos, max_distance):
+    # rotate the vehicle vertices
+    rotated_vehicle_vertices_ego = transform_vehicle_to_ego_2d(v_loc, v_angles, v_extent, ego_pos)
+
     if np.all(np.abs(rotated_vehicle_vertices_ego) > max_distance):
         return None
 

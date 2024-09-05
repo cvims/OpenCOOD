@@ -1,17 +1,13 @@
 """
 Basedataset class for lidar data pre-processing
 """
-import os
-import random
 from collections import OrderedDict
 import numpy as np
 
+from opencood.utils.pcd_utils import pcd_to_np
 from opencood.utils.camera_utils import load_rgb_from_files
-from opencood.hypes_yaml.yaml_utils import load_yaml
 from opencood.utils.transformation_utils import calculate_prev_pose_offset
 from opencood.data_utils.datasets.basedataset import BaseDataset
-
-from torch.utils.data import DataLoader
 
 
 class BaseScenarioDataset(BaseDataset):
@@ -55,8 +51,8 @@ class BaseScenarioDataset(BaseDataset):
         else:
             self.timestamp_offset_mean = 0
             self.timestamp_offset_std = 0
-
-        self.camera_container = kwargs.get('cam_container', None)
+        
+        self.sensor_cache_container = kwargs.get('sensor_cache_container', None)
 
         super(BaseScenarioDataset, self).__init__(params, visualize, train, validate, **kwargs)
 
@@ -68,13 +64,9 @@ class BaseScenarioDataset(BaseDataset):
         """
         Abstract method, needs to be define by the children class.
         """
-
-        # # TODO
-        # self.retrieve_base_data(idx)
-        # return 1
         raise NotImplementedError
 
-    def retrieve_base_data(self, idx, cur_ego_pose_flag=True):
+    def retrieve_base_data(self, idx, cur_ego_pose_flag=True, load_camera_data=False, load_lidar_data=False):
         """
         Given the index, return the corresponding data.
 
@@ -93,6 +85,7 @@ class BaseScenarioDataset(BaseDataset):
             The dictionary contains loaded yaml params and lidar data for
             each cav.
         """
+        assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
         # if the queue length is set to 1, then the vehicle offset is already the connection to the previous car
         # otherwise it starts with the second vehicle (e.g. the first vehicle offset is the identity matrix)
 
@@ -115,6 +108,9 @@ class BaseScenarioDataset(BaseDataset):
             data = OrderedDict()
             # load files for all CAVs
             for cav_id, cav_content in scenario_database.items():
+                if timestamp_key not in cav_content:
+                    continue
+
                 data[cav_id] = OrderedDict()
                 data[cav_id]['ego'] = cav_content['ego']
                 data[cav_id]['vehicles'] = cav_content[timestamp_key]['yaml']['vehicles']
@@ -132,6 +128,7 @@ class BaseScenarioDataset(BaseDataset):
                                                                 timestamp_index_delay)
                 # add time delay to vehicle parameters
                 data[cav_id]['time_delay'] = timestamp_delay
+                data[cav_id]['timestamp_key'] = timestamp_key_delay
 
                 # load the camera transformation matrix to dictionary
 
@@ -142,17 +139,13 @@ class BaseScenarioDataset(BaseDataset):
                     cav_content, ego_cav_content,
                     timestamp_key, timestamp_key_delay, cur_ego_pose_flag)
 
-                # todo temporally disable pcd loading
-                # data[cav_id]['lidar_np'] = \
-                #     pcd_utils.pcd_to_np(cav_content[timestamp_key_delay]['lidar'])
+                if load_lidar_data:
+                    data[cav_id]['lidar_np'] = \
+                        pcd_to_np(cav_content[timestamp_key_delay]['lidar'], self.sensor_cache_container)
 
-                # data[cav_id]['camera_np'] = \
-                #     load_rgb_from_files(
-                #         cav_content[timestamp_key_delay]['cameras'], self.camera_container)
-                
-                data[cav_id]['camera_np'] = \
-                    load_rgb_from_files(
-                        cav_content[timestamp_key_delay]['cameras'], self.camera_container)
+                if load_camera_data:
+                    data[cav_id]['camera_np'] = \
+                        load_rgb_from_files(cav_content[timestamp_key_delay]['cameras'], self.sensor_cache_container)                    
 
                 # add previous bev information
                 if i == 0:
@@ -295,113 +288,3 @@ class BaseScenarioDataset(BaseDataset):
             Reformatted batch.
         """
         raise NotImplementedError
-
-
-# Function to load images from paths
-def load_images_from_path(cam_paths):
-    images = {}
-    for cam_pth, name in cam_paths:
-        image = cv2.imread(cam_pth)
-        if image is not None:
-            key = generate_key_from_path(cam_pth)
-            images[key] = image
-        else:
-            print(f"Warning: {cam_pth} could not be loaded.")
-    return images
-
-
-# Helper function to generate key from path
-def generate_key_from_path(path):
-    parts = path.split('/')
-    folder = parts[-3]
-    cav_id = parts[-2]
-    timestamp = parts[-1].split('_')[0]
-    name = parts[-1].split('_')[-1].replace('.png', '')
-    return generate_key(folder, cav_id, timestamp, name)
-
-
-# Main function to load images into a container
-def load_images_into_container(root_dir, all_yamls):
-    all_images = {}
-
-    def prepare_paths(folder, cav_id, timestamp):
-        paths = []
-        base_path = os.path.join(root_dir, folder, str(cav_id))
-        for cam_idx in range(4):
-            cam_pth = os.path.join(base_path, f'{timestamp}_camera{cam_idx}.png')
-            paths.append((cam_pth, f'camera{cam_idx}'))
-        return paths
-
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = []
-        for folder in all_yamls:
-            full_path = os.path.join(root_dir, folder)
-            for cav_id in all_yamls[folder]:
-                for timestamp in all_yamls[folder][cav_id]:
-                    cam_paths = prepare_paths(folder, cav_id, timestamp)
-                    futures.append(executor.submit(load_images_from_path, cam_paths))
-
-        for future in concurrent.futures.as_completed(futures):
-            images = future.result()
-            all_images.update(images)
-
-    return all_images
-
-
-
-def generate_key(scenario_folder, cav_id, timestamp, camera_name):
-    return f"{scenario_folder}:{cav_id}:{timestamp}:{camera_name}"
-
-if __name__ == '__main__':
-    random.seed(0)
-    import pickle
-    import cv2
-    import concurrent.futures
-
-    config_file = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/aaa_test.yaml'
-    params = load_yaml(config_file)
-    params['fusion']['args'] = {}
-    params['fusion']['args']['queue_length'] = 4
-
-    CAMERA_CONTAINER = load_images_into_container(
-        params['validate_dir'],
-        pickle.load(open(os.path.join(params['validate_dir'], 'yamls.pkl'), 'rb')))
-
-    dataset = BaseScenarioDataset(params, visualize=False, train=False, validate=True, cam_container=CAMERA_CONTAINER)
-    # # test
-    import time
-    # start = time.time()
-    # dataset.retrieve_base_data(0)
-    # print(time.time() - start)
-
-    # # create a data loader
-    import tqdm
-    data_loader = DataLoader(
-        dataset,
-        batch_size=16,
-        shuffle=True,
-        num_workers=8,
-        pin_memory=False,
-        persistent_workers=True
-    )
-
-    start = time.time()
-    for data in tqdm.tqdm(data_loader):
-        pass
-    print('First run:', time.time() - start)
-
-    start = time.time()
-    for data in tqdm.tqdm(data_loader):
-        pass
-    print('Second run:', time.time() - start)
-
-    start = time.time()
-    for data in tqdm.tqdm(data_loader):
-        pass
-    print('Third run:', time.time() - start)
-
-
-    start = time.time()
-    for data in tqdm.tqdm(data_loader):
-        pass
-    print('Fourth run:', time.time() - start)

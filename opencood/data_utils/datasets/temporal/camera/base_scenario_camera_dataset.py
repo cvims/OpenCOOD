@@ -1,16 +1,10 @@
 """
 A plain dataset class for cameras
 """
-from collections import OrderedDict
-
-import numpy as np
-
-from opencood.utils import box_utils, common_utils, camera_utils
+from opencood.utils import box_utils, camera_utils
 from opencood.data_utils.datasets.temporal.base_scenario_dataset import BaseScenarioDataset
 from opencood.data_utils.post_processor import build_postprocessor
 from opencood.data_utils.pre_processor import build_preprocessor
-
-from opencood.data_utils.datasets import COM_RANGE
 
 
 class BaseScenarioCameraDataset(BaseScenarioDataset):
@@ -22,93 +16,7 @@ class BaseScenarioCameraDataset(BaseScenarioDataset):
         self.post_processor = build_postprocessor(params['postprocess'], train)
 
     def get_sample_random(self, idx):
-        base_data_dict = self.retrieve_base_data(idx, True)
-
-        return self.get_data_sample(base_data_dict)
-
-    def get_data_sample(self, base_data_dict):
-        scenario_samples = []
-        # iterate through queue
-        for scenario in base_data_dict:
-            processed_data_dict = OrderedDict()
-
-            ego_id, ego_lidar_pose = self.find_ego_pose(scenario)
-
-            # used to save all object coordinates under ego space
-            object_stack = []
-            object_id_stack = []
-
-            # loop over all CAVs to process information
-            for cav_id, selected_cav_base in scenario.items():
-                # check if the cav is within the communication range with ego
-                distance = common_utils.cav_distance_cal(selected_cav_base,
-                                                        ego_lidar_pose)
-                if distance > COM_RANGE:
-                    continue
-                processed_data_dict[cav_id] = scenario[cav_id]
-                # the objects bbx position under ego and cav lidar coordinate frame
-                object_bbx_ego, object_bbx_cav, object_ids = \
-                    self.get_item_single_car(selected_cav_base,
-                                            ego_lidar_pose)
-
-                object_stack.append(object_bbx_ego)
-                object_id_stack += object_ids
-
-                processed_data_dict[cav_id]['object_bbx_cav'] = object_bbx_cav
-                processed_data_dict[cav_id]['object_id'] = object_ids
-
-            # Object stack contains all objects that can be detected from all
-            # cavs nearby under ego coordinates. We need to exclude the repititions
-            unique_indices = \
-                [object_id_stack.index(x) for x in set(object_id_stack)]
-            object_stack = np.vstack(object_stack)
-            object_stack = object_stack[unique_indices]
-
-            # make sure bounding boxes across all frames have the same number
-            object_bbx_center = \
-                np.zeros((100, 7))
-            mask = np.zeros(100)
-            object_bbx_center[:object_stack.shape[0], :] = object_stack
-            mask[:object_stack.shape[0]] = 1
-
-            # update the ego vehicle with all objects coordinates
-            processed_data_dict[ego_id]['object_bbx_ego'] = object_bbx_center
-            processed_data_dict[ego_id]['object_bbx_ego_mask'] = mask
-
-            scenario_samples.append(processed_data_dict)
-
-        return scenario_samples
-
-    def get_item_single_car(self, selected_cav_base, ego_pose):
-        """
-        Get the selected vehicle's camera
-        Parameters
-        ----------
-        selected_cav_base : dict
-            The basic information of the selected vehicle.
-
-        ego_pose : list
-            The ego vehicle's (lidar) pose.
-
-        Returns
-        -------
-        objects coordinates under ego coordinate frame and corresponding
-        object ids.
-        """
-
-        # generate the bounding box(n, 7) under the ego space
-        object_bbx_center_ego, object_bbx_mask, object_ids = \
-            self.post_processor.generate_object_center([selected_cav_base],
-                                                       ego_pose)
-        # generate the bounding box under the cav space
-        object_bbx_center_cav, object_bbx_mask_cav, _ = \
-            self.post_processor.generate_object_center(
-                [selected_cav_base],
-                selected_cav_base['params']['lidar_pose'])
-
-        return object_bbx_center_ego[object_bbx_mask == 1], \
-               object_bbx_center_cav[object_bbx_mask_cav == 1], \
-               object_ids
+        return self.retrieve_base_data(idx, True, load_camera_data=True, load_lidar_data=False)
 
     def visualize_agent_camera_bbx(self, agent_sample,
                                    camera='camera0', draw_3d=True,
@@ -232,9 +140,20 @@ class BaseScenarioCameraDataset(BaseScenarioDataset):
 
 if __name__ == '__main__':
     from opencood.hypes_yaml.yaml_utils import load_yaml
+    import random
+
+    random.seed(0)
+    import pickle
+    import os
 
     config_file = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/aaa_test.yaml'
     params = load_yaml(config_file)
+    params['fusion']['args'] = {}
+    params['fusion']['args']['queue_length'] = 4
 
-    dataset = BaseScenarioCameraDataset(params, visualize=False, train=True, validate=False)
+    # CAMERA_CONTAINER = load_images_into_container(
+    #     params['validate_dir'],
+    #     pickle.load(open(os.path.join(params['validate_dir'], 'yamls.pkl'), 'rb')))
+
+    dataset = BaseScenarioCameraDataset(params, visualize=False, train=True, validate=False, sensor_cache_container=CAMERA_CONTAINER)
     dataset.get_sample_random(0)

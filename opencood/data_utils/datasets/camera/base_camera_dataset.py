@@ -4,10 +4,8 @@ A plain dataset class for cameras
 from collections import OrderedDict
 
 import numpy as np
-
-from opencood.data_utils.datasets import COM_RANGE
 from opencood.data_utils.datasets import basedataset_old
-from opencood.utils import box_utils, common_utils, camera_utils
+from opencood.utils import box_utils, camera_utils
 from opencood.data_utils.post_processor import build_postprocessor
 from opencood.data_utils.pre_processor import build_preprocessor
 
@@ -45,11 +43,6 @@ class BaseCameraDataset(basedataset_old.BaseDataset):
 
         # loop over all CAVs to process information
         for cav_id, selected_cav_base in base_data_dict.items():
-            # check if the cav is within the communication range with ego
-            distance = common_utils.cav_distance_cal(selected_cav_base,
-                                                     ego_lidar_pose)
-            if distance > COM_RANGE:
-                continue
             processed_data_dict[cav_id] = base_data_dict[cav_id]
             # the objects bbx position under ego and cav lidar coordinate frame
             object_bbx_ego, object_bbx_cav, object_ids = \

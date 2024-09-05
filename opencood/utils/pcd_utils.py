@@ -11,7 +11,7 @@ import open3d as o3d
 import numpy as np
 
 
-def pcd_to_np(pcd_file):
+def pcd_to_np(pcd_file, lidar_container=None):
     """
     Read  pcd and return numpy array.
 
@@ -28,7 +28,14 @@ def pcd_to_np(pcd_file):
         The lidar data in numpy format, shape:(n, 4)
 
     """
-    pcd = o3d.io.read_point_cloud(pcd_file)
+    if lidar_container is None:
+        pcd = o3d.io.read_point_cloud(pcd_file)
+    else:
+        if pcd_file in lidar_container:
+            pcd = lidar_container[pcd_file]
+        else:
+            pcd = o3d.io.read_point_cloud(pcd_file)
+            lidar_container[pcd_file] = pcd
 
     xyz = np.asarray(pcd.points)
     # we save the intensity in the first channel
