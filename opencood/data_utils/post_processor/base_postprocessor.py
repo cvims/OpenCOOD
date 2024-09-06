@@ -97,7 +97,8 @@ class BasePostprocessor(object):
 
     def generate_object_center(self,
                                cav_contents,
-                               reference_lidar_pose):
+                               reference_lidar_pose,
+                               range_filter=None):
         """
         Retrieve all objects in a format of (n, 7), where 7 represents
         x, y, z, l, w, h, yaw or x, y, z, h, w, l, yaw.
@@ -126,8 +127,11 @@ class BasePostprocessor(object):
             tmp_object_dict.update(cav_content['params']['vehicles'])
 
         output_dict = {}
-        filter_range = self.params['anchor_args']['cav_lidar_range'] \
-            if self.train else GT_RANGE
+        if range_filter is None:
+            filter_range = self.params['anchor_args']['cav_lidar_range'] \
+                if self.train else GT_RANGE
+        else:
+            filter_range = range_filter
 
         box_utils.project_world_objects(tmp_object_dict,
                                         output_dict,

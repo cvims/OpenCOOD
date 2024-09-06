@@ -20,5 +20,15 @@ class BaseScenarioLidarDataset(BaseScenarioDataset):
         self.pre_processor = build_preprocessor(params['preprocess'],
                                                 train)
         self.post_processor = build_postprocessor(params['postprocess'], train)
+
+        # whether there is a time delay between the time that cav project
+        # lidar to ego and the ego receive the delivered feature
+        self.cur_ego_pose_flag = True if 'cur_ego_pose_flag' not in \
+            params['fusion']['args'] else \
+            params['fusion']['args']['cur_ego_pose_flag']
     
+    def get_sample_random(self, idx):
+        return self.retrieve_base_data(idx, self.cur_ego_pose_flag, load_camera_data=False, load_lidar_data=True)
+
+
     

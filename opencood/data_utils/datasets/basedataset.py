@@ -464,6 +464,50 @@ class BaseDataset(Dataset):
                                                              cur_ego_pose_flag)
         
         return data
+    
+    def get_pairwise_transformation(self, base_data_dict, max_cav, proj_first=False):
+        """
+        Get pair-wise transformation matrix accross different agents.
+
+        Parameters
+        ----------
+        base_data_dict : dict
+            Key : cav id, item: transformation matrix to ego, lidar points.
+
+        max_cav : int
+            The maximum number of cav, default 5
+
+        Return
+        ------
+        pairwise_t_matrix : np.array
+            The pairwise transformation matrix across each cav.
+            shape: (L, L, 4, 4)
+        """
+        pairwise_t_matrix = np.zeros((max_cav, max_cav, 4, 4))
+
+        if proj_first:
+            # if lidar projected to ego first, then the pairwise matrix
+            # becomes identity
+            pairwise_t_matrix[:, :] = np.identity(4)
+        else:
+            t_list = []
+
+            # save all transformation matrix in a list in order first.
+            for cav_id, cav_content in base_data_dict.items():
+                t_list.append(cav_content['params']['transformation_matrix'])
+
+            for i in range(len(t_list)):
+                for j in range(len(t_list)):
+                    # identity matrix to self
+                    if i == j:
+                        t_matrix = np.eye(4)
+                        pairwise_t_matrix[i, j] = t_matrix
+                        continue
+                    # i->j: TiPi=TjPj, Tj^(-1)TiPi = Pj
+                    t_matrix = np.dot(np.linalg.inv(t_list[j]), t_list[i])
+                    pairwise_t_matrix[i, j] = t_matrix
+
+        return pairwise_t_matrix
 
 
 if __name__ == '__main__':

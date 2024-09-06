@@ -7,9 +7,7 @@ import numpy as np
 import torch
 
 from opencood.utils.common_utils import vehicle_in_bev_range
-from opencood.utils.temporal_utils import filter_vehicles_by_category, update_temporal_vehicles_list
 from opencood.data_utils.datasets.temporal.camera.base_scenario_camera_dataset import BaseScenarioCameraDataset
-from opencood.utils.bev_creation import create_bev
 
 
 class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
@@ -71,8 +69,7 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
             assert len(ego_lidar_pose) > 0
 
             pairwise_t_matrix = \
-                self.get_pairwise_transformation(data_sample,
-                                                self.params['train_params']['max_cav'])
+                self.get_pairwise_transformation(data_sample, self.params['train_params']['max_cav'], proj_first=False)
         
             # save all detected vehicles. We can use the ego because the yaml already contains all vehicles of the map.
             in_range_vehicles = {}
@@ -111,13 +108,7 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
 
                 prev_pose_offsets.append(selected_cav_base['prev_pose_offset'])
 
-                # use full bev if this is the last scenario iteration
-                if s_idx == len(scenario_samples) - 1:
-                    selected_cav_processed = \
-                        self.get_single_cav(selected_cav_base)
-                else:
-                    selected_cav_processed = \
-                        self.get_single_cav(selected_cav_base)
+                selected_cav_processed = self.get_single_cav(selected_cav_base)
 
                 camera_data.append(selected_cav_processed['camera']['data'])
                 camera_intrinsic.append(
@@ -184,95 +175,6 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
             scenario_processed.append(processed_data_dict)
 
         return scenario_processed
-
-
-    def create_temporal_gt(self, vehicles, ego_pos, ego_id):
-        # find all detected vehicles of all given vehicles lists (strategy?)
-        # When is a vehicle considered visible?
-        category_filtered_vehicles = [filter_vehicles_by_category(vehicle_list, self.camera_detection_criteria_threshold, True) for vehicle_list in vehicles]
-
-        temporal_vehicles_list = update_temporal_vehicles_list(vehicles, category_filtered_vehicles)
-        
-        # we use the data from the latest frame list to build the ground truth
-        temporal_visible_gt_vehicles = dict()
-        all_gt_vehicles = dict()
-        for veh_id, v_data in vehicles[-1].items():
-            if veh_id == ego_id:
-                # Ignore ego vehicle
-                continue
-
-            if veh_id in temporal_vehicles_list[-1]:
-                temporal_visible_gt_vehicles[veh_id] = v_data
-
-            all_gt_vehicles[veh_id] = v_data
-
-        temporal_gt, _ = create_bev(
-            vehicles=temporal_visible_gt_vehicles,
-            t_ego_pos=ego_pos,
-            bev_image_size=self.bev_image_size,
-            bev_width=self.bev_width,
-            bev_height=self.bev_height,
-        )
-
-        # only keep visible vehicles
-        temporal_visible_gt_vehicles = {k: v for k, v in temporal_visible_gt_vehicles.items()}
-
-        full_temporal_gt, _ = create_bev(
-            vehicles=all_gt_vehicles,  # all vehicles in the last frame (except ego)
-            t_ego_pos=ego_pos,
-            bev_image_size=self.bev_image_size,
-            bev_width=self.bev_width,
-            bev_height=self.bev_height,
-        )
-
-        # only keep visible vehicles
-        all_gt_vehicles = {k: v for k, v in all_gt_vehicles.items()}
-
-        return temporal_gt, temporal_visible_gt_vehicles, full_temporal_gt, all_gt_vehicles
-
-    @staticmethod
-    def get_pairwise_transformation(base_data_dict, max_cav):
-        """
-        Get pair-wise transformation matrix accross different agents.
-
-        Parameters
-        ----------
-        base_data_dict : dict
-            Key : cav id, item: transformation matrix to ego, lidar points.
-
-        max_cav : int
-            The maximum number of cav, default 5
-
-        Return
-        ------
-        pairwise_t_matrix : np.array
-            The pairwise transformation matrix across each cav.
-            shape: (L, L, 4, 4)
-        """
-        pairwise_t_matrix = np.zeros((max_cav, max_cav, 4, 4))
-        # default are identity matrix
-        pairwise_t_matrix[:, :] = np.identity(4)
-
-        # return pairwise_t_matrix
-
-        t_list = []
-
-        # save all transformation matrix in a list in order first.
-        for i, (cav_id, cav_content) in enumerate(base_data_dict.items()):
-            if i >= max_cav:
-                break
-            t_list.append(cav_content['params']['transformation_matrix'])
-
-        for i in range(len(t_list)):
-            for j in range(len(t_list)):
-                # identity matrix to self
-                if i == j:
-                    continue
-                # i->j: TiPi=TjPj, Tj^(-1)TiPi = Pj
-                t_matrix = np.dot(np.linalg.inv(t_list[j]), t_list[i])
-                pairwise_t_matrix[i, j] = t_matrix
-
-        return pairwise_t_matrix
 
 
     def get_single_cav(self, selected_cav_base):
