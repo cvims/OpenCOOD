@@ -26,10 +26,6 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
             **kwargs
         )
 
-        self.bev_image_size = params['fusion']['args']['bev_dim']  # px
-        self.bev_width = params['fusion']['args']['bev_width']  # m
-        self.bev_height = params['fusion']['args']['bev_height']  # m
-
         # TODO augmentation
 
     def __getitem__(self, idx):
@@ -531,7 +527,7 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
 if __name__ == '__main__':
     from opencood.hypes_yaml.yaml_utils import load_yaml
 
-    config_file = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/aaa_test.yaml'
+    config_file = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/aaa_test_camera.yaml'
     params = load_yaml(config_file)
 
     dataset = CamScenarioIntermediateFusionDataset(params, visualize=False, train=True, validate=False)

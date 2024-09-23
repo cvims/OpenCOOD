@@ -32,7 +32,7 @@ def set_category_by_camera_props(camera_props: dict, category_config: dict):
 
     easy = category_config['easy']
     moderate = category_config['moderate']
-    hard = category_config['hard']['args']
+    hard = category_config['hard']
     very_hard = category_config['very_hard']
     none = category_config['none']
 
@@ -64,8 +64,22 @@ def categorize_vehicle_visibility_by_camera_props(vehicle_list: list, category_c
     Categorize vehicles in the temporal vehicles list by the camera properties.
     """
     for vehicle in vehicle_list.values():
-        # vehicle['camera_visibility'] = set_category_by_camera_props(vehicle['camera_props'], category_config)
-        vehicle['camera_visibility'] = VISIBLITY_CATEGORY_ENUM['moderate']
+        # the minimum (easiest) visibility is chosen
+        # e.g. one camera has a visibility of 'hard' and another camera has a visibility of 'easy'
+        # then the visibility of the vehicle is 'easy'
+        min_vehicle_visibility = VISIBLITY_CATEGORY_ENUM['none']
+
+        # each vehicle can be detected by multiple cameras
+        # filter by attribute camera{0,1,2,3}
+        for camera_vis_key in ['camera0', 'camera1', 'camera2', 'camera3']:  # static for opv2v
+            # check if vehicle has camera_vis_key
+            if camera_vis_key in vehicle:
+                camera_visibility = vehicle[camera_vis_key]
+                category_by_props = set_category_by_camera_props(camera_visibility, category_config)
+                min_vehicle_visibility = min(min_vehicle_visibility, category_by_props)
+
+        vehicle['camera_visibility'] = min_vehicle_visibility
+        # vehicle['camera_visibility'] = VISIBLITY_CATEGORY_ENUM['moderate']
     
     return vehicle_list
 

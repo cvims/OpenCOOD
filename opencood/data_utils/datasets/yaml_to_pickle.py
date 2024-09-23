@@ -68,10 +68,10 @@ if __name__ == '__main__':
     data_main_path = r'/data/public_datasets/OPV2V/original'
 
     train_path = os.path.join(data_main_path, 'train', 'additional')
-    load_and_store_in_one_file(train_path, os.path.join(train_path, 'yamls_additional.pkl'))
+    load_and_store_in_one_file(train_path, os.path.join(train_path, 'yamls.pkl'))
 
-    validate_path = os.path.join(data_main_path, 'validate', 'additional')
-    load_and_store_in_one_file(validate_path, os.path.join(validate_path, 'yamls_additional.pkl'))
+    # validate_path = os.path.join(data_main_path, 'validate', 'additional')
+    # load_and_store_in_one_file(validate_path, os.path.join(validate_path, 'yamls.pkl'))
 
-    test_path = os.path.join(data_main_path, 'test', 'additional')
-    load_and_store_in_one_file(test_path, os.path.join(test_path, 'yamls_additional.pkl'))
+    # test_path = os.path.join(data_main_path, 'test', 'additional')
+    # load_and_store_in_one_file(test_path, os.path.join(test_path, 'yamls.pkl'))

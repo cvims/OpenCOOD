@@ -221,6 +221,11 @@ def update_yaml_with_lidar_hits(org_path: str, additional_path: str):
     folders_org = sorted(os.listdir(org_path))
     # delete 'additional' folder from folders_org
     folders_org.remove('additional')
+    # remove 'yamls.pkl' from both lists
+    if 'yamls.pkl' in folders:
+        folders.remove('yamls.pkl')
+    if 'yamls.pkl' in folders_org:
+        folders_org.remove('yamls.pkl')
 
     # check if all folders are present
     assert folders == folders_org, 'Folders do not match'
@@ -262,7 +267,17 @@ def update_yaml_with_lidar_hits(org_path: str, additional_path: str):
             
 
 if __name__ == '__main__':
-    original_path = r'/data/public_datasets/OPV2V/original/train'
-    additional_path = r'/data/public_datasets/OPV2V/original/train/additional'
+    # original_path = r'/data/public_datasets/OPV2V/original/train'
+    # additional_path = r'/data/public_datasets/OPV2V/original/train/additional'
+
+    # update_yaml_with_lidar_hits(original_path, additional_path)
+
+    # original_path = r'/data/public_datasets/OPV2V/original/validate'
+    # additional_path = r'/data/public_datasets/OPV2V/original/validate/additional'
+
+    # update_yaml_with_lidar_hits(original_path, additional_path)
+
+    original_path = r'/data/public_datasets/OPV2V/original/test'
+    additional_path = r'/data/public_datasets/OPV2V/original/test/additional'
 
     update_yaml_with_lidar_hits(original_path, additional_path)

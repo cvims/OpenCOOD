@@ -18,13 +18,20 @@ class BaseScenarioCameraDataset(BaseScenarioDataset):
                                                 train)
         self.post_processor = build_postprocessor(params['postprocess'], train)
 
+        self.bev_image_size = params['fusion']['args']['bev_dim']  # px
+        self.bev_width = params['fusion']['args']['bev_width']  # m
+        self.bev_height = params['fusion']['args']['bev_height']  # m
+
     def get_sample_random(self, idx):
         return self.retrieve_base_data(idx, True, load_camera_data=True, load_lidar_data=False)
     
     def create_temporal_gt(self, vehicles, ego_pos, ego_id):
         # find all detected vehicles of all given vehicles lists (strategy?)
         # When is a vehicle considered visible?
-        category_filtered_vehicles = [filter_vehicles_by_category(vehicle_list, self.camera_detection_criteria_threshold, True) for vehicle_list in vehicles]
+        category_filtered_vehicles = [
+            filter_vehicles_by_category(vehicle_list, self.camera_detection_criteria_threshold, True)
+            for vehicle_list in vehicles
+        ]
 
         temporal_vehicles_list = update_temporal_vehicles_list(vehicles, category_filtered_vehicles)
         
@@ -60,7 +67,7 @@ class BaseScenarioCameraDataset(BaseScenarioDataset):
             bev_height=self.bev_height,
         )
 
-        # only keep visible vehicles
+        # keep all vehicles
         all_gt_vehicles = {k: v for k, v in all_gt_vehicles.items()}
 
         return temporal_gt, temporal_visible_gt_vehicles, full_temporal_gt, all_gt_vehicles
