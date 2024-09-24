@@ -11,7 +11,7 @@ import math
 import numpy as np
 
 
-def load_yaml(file, opt=None):
+def load_yaml(file, opt=None, use_cloader=False):
     """
     Load yaml file and return a dictionary.
 
@@ -31,7 +31,11 @@ def load_yaml(file, opt=None):
         file = os.path.join(opt.model_dir, 'config.yaml')
 
     stream = open(file, 'r')
-    loader = yaml.Loader
+    if use_cloader:        
+        loader = yaml.CLoader
+    else:
+        loader = yaml.Loader
+
     loader.add_implicit_resolver(
         u'tag:yaml.org,2002:float',
         re.compile(u'''^(?:

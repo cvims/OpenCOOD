@@ -70,8 +70,8 @@ if __name__ == '__main__':
     train_path = os.path.join(data_main_path, 'train', 'additional')
     load_and_store_in_one_file(train_path, os.path.join(train_path, 'yamls.pkl'))
 
-    # validate_path = os.path.join(data_main_path, 'validate', 'additional')
-    # load_and_store_in_one_file(validate_path, os.path.join(validate_path, 'yamls.pkl'))
+    validate_path = os.path.join(data_main_path, 'validate', 'additional')
+    load_and_store_in_one_file(validate_path, os.path.join(validate_path, 'yamls.pkl'))
 
-    # test_path = os.path.join(data_main_path, 'test', 'additional')
-    # load_and_store_in_one_file(test_path, os.path.join(test_path, 'yamls.pkl'))
+    test_path = os.path.join(data_main_path, 'test', 'additional')
+    load_and_store_in_one_file(test_path, os.path.join(test_path, 'yamls.pkl'))

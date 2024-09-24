@@ -511,7 +511,7 @@ class BaseDataset(Dataset):
 
 
 if __name__ == '__main__':
-    config_file = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/aaa_test.yaml'
+    config_file = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/aaa_test_camera.yaml'
     params = load_yaml(config_file)
 
     dataset = BaseDataset(params, visualize=False, train=True, validate=False)

@@ -70,6 +70,11 @@ class BaseScenarioCameraDataset(BaseScenarioDataset):
         # keep all vehicles
         all_gt_vehicles = {k: v for k, v in all_gt_vehicles.items()}
 
+        # # save gt to disk (temporal_gt)
+        # import matplotlib.pyplot as plt
+        # plt.imsave('test.png', temporal_gt)
+        # plt.imsave('full_temporal_gt.png', full_temporal_gt)
+
         return temporal_gt, temporal_visible_gt_vehicles, full_temporal_gt, all_gt_vehicles
 
     def visualize_agent_camera_bbx(self, agent_sample,

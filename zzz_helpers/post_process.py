@@ -1,10 +1,8 @@
 import numpy as np
-import yaml
 import cv2
 import os
-import matplotlib.pyplot as plt
 from kitti_helpers import calculate_occlusion_stats, calculate_occlusion, calc_bbox_height
-from kitti_helpers import point_in_canvas, calc_projected_2d_bbox, crop_boxes_in_canvas, calculate_truncation
+from kitti_helpers import calc_projected_2d_bbox, crop_boxes_in_canvas, calculate_truncation
 import tqdm
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from project_boxes_to_image import x_to_world, create_3d_box, get_image_points, actor_in_front_of_camera
@@ -62,138 +60,12 @@ def read_rgb_image(path: str) -> np.ndarray:
     rgb_image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     return rgb_image
 
-def get_transformation_matrix(location, rotation):
-    """
-    Creates a transformation matrix from location and rotation (roll, yaw, pitch).
-    """
-    # Assuming the order of rotation is roll, yaw, pitch (rotation[0] = roll, rotation[1] = yaw, rotation[2] = pitch)
-    c_r = np.cos(np.radians(rotation[0]))  # Roll
-    s_r = np.sin(np.radians(rotation[0]))
-    c_y = np.cos(np.radians(rotation[1]))  # Yaw
-    s_y = np.sin(np.radians(rotation[1]))
-    c_p = np.cos(np.radians(rotation[2]))  # Pitch
-    s_p = np.sin(np.radians(rotation[2]))
-
-    matrix = np.matrix(np.identity(4))
-    matrix[0, 3] = location[0] # x
-    matrix[1, 3] = location[1] # y
-    matrix[2, 3] = location[2] # z
-    matrix[0, 0] = c_p * c_y
-    matrix[0, 1] = c_y * s_p * s_r - s_y * c_r
-    matrix[0, 2] = -c_y * s_p * c_r - s_y * s_r
-    matrix[1, 0] = s_y * c_p
-    matrix[1, 1] = s_y * s_p * s_r + c_y * c_r
-    matrix[1, 2] = -s_y * s_p * c_r + c_y * s_r
-    matrix[2, 0] = s_p
-    matrix[2, 1] = -c_p * s_r
-    matrix[2, 2] = c_p * c_r
-    return matrix
-
-def create_bounding_box_points(extent):
-    """
-    Returns the 3D coordinates of the vehicle's bounding box in its local coordinate system.
-    """
-    cords = np.zeros((8, 4))
-    cords[0, :] = np.array([extent[0], extent[1], 0, 1])
-    cords[1, :] = np.array([-extent[0], extent[1], 0, 1])
-    cords[2, :] = np.array([-extent[0], -extent[1], 0, 1])
-    cords[3, :] = np.array([extent[0], -extent[1], 0, 1])
-    cords[4, :] = np.array([extent[0], extent[1], 2*extent[2], 1])
-    cords[5, :] = np.array([-extent[0], extent[1], 2*extent[2], 1])
-    cords[6, :] = np.array([-extent[0], -extent[1], 2*extent[2], 1])
-    cords[7, :] = np.array([extent[0], -extent[1], 2*extent[2], 1])
-    return cords
-
-def get_bounding_box(vehicle_info, camera_info):
-    # Vehicle Transformation
-    location = vehicle_info['location'] # x, y, z
-    rotation = vehicle_info['angle'] # roll, yaw, pitch
-    vehicle_matrix = get_transformation_matrix(location, rotation)
-
-    # Camera Transformation
-    location = camera_info['cords'][:3] # x, y, z
-    rotation = camera_info['cords'][3:] # roll, yaw, pitch
-    camera_matrix = get_transformation_matrix(location, rotation)
-    world_to_camera = np.linalg.inv(camera_matrix)
-    
-    # Create the bounding box in vehicle coordinates
-    extent = vehicle_info['extent']
-    bounding_box = create_bounding_box_points(extent)
-
-    # Transform bounding box to from vehicle to world coordinates
-    bb_world_cords = np.dot(vehicle_matrix, bounding_box.T)
-
-    # Transform bounding box from world to camera coordinates
-    bb_camera_cords = np.dot(world_to_camera, bb_world_cords).T
-    camera_bbox = bb_camera_cords[:, :3]
-
-    # Project to camera plane (x, y ,z) -> (y, -z, x)
-    camera_bbox = np.array([camera_bbox[:, 1], -camera_bbox[:, 2], camera_bbox[:, 0]]).T
-    camera_bbox = camera_bbox.squeeze()
-    # Project the bounding box to the image plane
-    points2d = np.dot(camera_info['intrinsic'], camera_bbox.T)
-
-    points_2d_depth = points2d[2, :]
-    points_2d = (points2d[:2, :] / points_2d_depth).T
-
-    # Stack the 2D points with their depth values to form [u, v, depth]
-    points_2d_depth = points_2d_depth.reshape(-1, 1)
-    points_2d_with_depth = np.hstack((points_2d, points_2d_depth))
-
-    return points_2d_with_depth
-
-def get_points_in_canvas(vehicles, rgb_image):
-    points_list = []
-    for vehicle in vehicles:
-        for bbox_point in vehicles[vehicle]['bbox']:    
-            x_2d = bbox_point[0]
-            y_2d = bbox_point[1]
-            point_depth = bbox_point[2]
-
-            # Adjust window check and ensure (u, v) are within valid ranges
-            if 100 > point_depth > 0 and point_in_canvas((x_2d, y_2d), window_height=rgb_image.shape[0], window_width=rgb_image.shape[1]):
-                points_list.append([x_2d, y_2d])
-    
-    # Iterate over the points and add them as red dots to the image
-    for point in points_list:
-        cv2.circle(rgb_image, (int(point[0]), int(point[1])), 5, (0, 0, 255), -1)
-    
-    # Save the image with the points
-    cv2.imwrite('points.png', rgb_image)
-    
-
-def post_process(data_path: str, overwrite: bool = False):
-    """
-    Post-process the data generated from the simulator
-
-    :param data_path: Path to the data directory holding all datapoints
-    :param overwrite: Overwrite the existing data or create new yaml file
-    """
-    results = {}
-    for datapoint in os.listdir(data_path):
-        results[datapoint] = {}
-        # open the .yaml file
-        data = yaml.load(open(os.path.join(data_path, datapoint, f'{datapoint}.yaml'), 'r'), Loader=yaml.FullLoader)
-        # read the depth image
-        depth_image = read_depth_image(os.path.join(data_path, datapoint, f'depth_raw.png'))
-        # read the rgb image
-        rgb_image = read_rgb_image(os.path.join(data_path, datapoint, f'rgb.png'))
-        # create a vehicle dict from the data
-        cameras = [key for key in data.keys() if 'camera' in key]
-        for camera in cameras:
-            # get the camera calibration
-            camera_info = data[camera]
-            vehicles_data = get_bbox(data['vehicles'], camera_info, depth_image)
-            vehicles_data = calculate_occlusion_stats(rgb_image, depth_image, vehicles_data)
-            vehicles_data = add_kitti_metrics(vehicles_data, rgb_image, depth_image)
-            results[datapoint][camera] = vehicles_data
-    return results
 
 def add_kitti_metrics(vehicles_data, image, depth_map):
     window_width = image.shape[1]
     window_height = image.shape[0]
     for vehicle in vehicles_data:
-        if vehicles_data[vehicle]['bbox'] is None or vehicles_data[vehicle]['num_visible_vertices'] <1:
+        if vehicles_data[vehicle]['bbox'] is None or vehicles_data[vehicle]['num_visible_vertices'] < 1:
             vehicles_data[vehicle]['bbox_height'] = None
             vehicles_data[vehicle]['occlusion'] = None
             vehicles_data[vehicle]['truncation'] = None
@@ -210,6 +82,7 @@ def add_kitti_metrics(vehicles_data, image, depth_map):
             vehicles_data[vehicle]['bbox_height'] = height
             vehicles_data[vehicle]['occlusion'] = raw_occlusion
             vehicles_data[vehicle]['truncation'] = truncation
+
     return vehicles_data
 
 
@@ -302,7 +175,7 @@ def update_yaml_with_camera_metrics(org_path: str, additional_path: str):
         for timestamp in timestamps:
             # load additional all_agents yaml
             yaml_file = os.path.join(additional_path, folder, f'{timestamp}_all_agents.yaml')
-            additional_yaml_content = yaml_utils.load_yaml(yaml_file)
+            additional_yaml_content = yaml_utils.load_yaml(yaml_file, use_cloader=True)
             # get vehicles
             all_vehicles = additional_yaml_content['vehicles']
             # iterate cav folders
@@ -311,10 +184,10 @@ def update_yaml_with_camera_metrics(org_path: str, additional_path: str):
                 additional_cav_path = os.path.join(additional_path, folder, cav_id)
                 # load cav yaml
                 cav_yaml_file = os.path.join(cav_path, f'{timestamp}.yaml')
-                cav_yaml_content = yaml_utils.load_yaml(cav_yaml_file)
+                cav_yaml_content = yaml_utils.load_yaml(cav_yaml_file, use_cloader=True)
                 # load additional cav yaml
                 additional_cav_yaml_file = os.path.join(additional_cav_path, f'{timestamp}.yaml')
-                additional_cav_yaml_content = yaml_utils.load_yaml(additional_cav_yaml_file)
+                additional_cav_yaml_content = yaml_utils.load_yaml(additional_cav_yaml_file, use_cloader=True)
                 # Load the camera files
                 for rgb_name, depth_name in [['camera0', 'front'], ['camera1', 'right'], ['camera2', 'left'], ['camera3', 'back']]:
                     camera_info = cav_yaml_content[rgb_name]
@@ -335,12 +208,13 @@ def update_yaml_with_camera_metrics(org_path: str, additional_path: str):
                         if vehicle_id_int == cav_id_int:
                             continue
                         additional_cav_yaml_content['vehicles'][vehicle_id_int][rgb_name] = {}
-                        additional_cav_yaml_content['vehicles'][vehicle_id_int][rgb_name]['camera_bbox_height'] = camera_visibility_vehicles_info[vehicle_id]['bbox_height']
-                        additional_cav_yaml_content['vehicles'][vehicle_id_int][rgb_name]['camera_occlusion'] = camera_visibility_vehicles_info[vehicle_id]['occlusion']
-                        additional_cav_yaml_content['vehicles'][vehicle_id_int][rgb_name]['camera_truncation'] = camera_visibility_vehicles_info[vehicle_id]['truncation']
+                        additional_cav_yaml_content['vehicles'][vehicle_id_int][rgb_name]['bbox_height'] = camera_visibility_vehicles_info[vehicle_id]['bbox_height']
+                        additional_cav_yaml_content['vehicles'][vehicle_id_int][rgb_name]['occlusion'] = camera_visibility_vehicles_info[vehicle_id]['occlusion']
+                        additional_cav_yaml_content['vehicles'][vehicle_id_int][rgb_name]['truncation'] = camera_visibility_vehicles_info[vehicle_id]['truncation']
 
-            # update the additional cav yaml with camera info
-            save_updated_yaml(additional_cav_yaml_content, additional_cav_yaml_file)
+                # update the additional cav yaml with camera info
+                save_updated_yaml(additional_cav_yaml_content, additional_cav_yaml_file)
+
 
 def save_updated_yaml(cav_yaml_content, new_yaml_file_path):
     yaml_utils.save_yaml(cav_yaml_content, new_yaml_file_path)

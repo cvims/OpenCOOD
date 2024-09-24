@@ -27,25 +27,23 @@ def set_category_by_lidar_hits(lidar_hits: int, category_config: dict):
 
 
 def set_category_by_camera_props(camera_props: dict, category_config: dict):
-    # TODO
-    print('Camera props are not yet implemented.')
+    cam_prop_occlusion = 0.0 if camera_props['occlusion'] is None else camera_props['occlusion']
+    cam_prop_bbox_height = 0.0 if camera_props['bbox_height'] is None else camera_props['bbox_height']
+    cam_prop_truncation = 0.0 if camera_props['truncation'] is None else camera_props['truncation']
 
-    easy = category_config['easy']
-    moderate = category_config['moderate']
-    hard = category_config['hard']
-    very_hard = category_config['very_hard']
-    none = category_config['none']
+    # List of categories in descending order of difficulty
+    categories = ['easy', 'moderate', 'hard', 'very_hard']
 
-    if camera_props['occlusion'] <= easy['occlusion']:
-        return VISIBLITY_CATEGORY_ENUM['easy']
-    elif camera_props['occlusion'] <= moderate['occlusion']:
-        return VISIBLITY_CATEGORY_ENUM['moderate']
-    elif camera_props['occlusion'] <= hard['occlusion']:
-        return VISIBLITY_CATEGORY_ENUM['hard']
-    elif camera_props['occlusion'] <= very_hard['occlusion']:
-        return VISIBLITY_CATEGORY_ENUM['very_hard']
-    else:
-        return VISIBLITY_CATEGORY_ENUM['none']
+    # Iterate over the categories and check conditions
+    for category in categories:
+        config = category_config[category]
+        if (cam_prop_bbox_height >= config['bbox_height'] and 
+            cam_prop_occlusion <= config['occlusion'] and 
+            cam_prop_truncation <= config['truncation']):
+            return VISIBLITY_CATEGORY_ENUM[category]
+
+    # If none of the categories match, return 'none'
+    return VISIBLITY_CATEGORY_ENUM['none']
     
 
 def categorize_vehicle_visibility_by_lidar_hits(vehicle_list: list, category_config: dict):
@@ -79,7 +77,6 @@ def categorize_vehicle_visibility_by_camera_props(vehicle_list: list, category_c
                 min_vehicle_visibility = min(min_vehicle_visibility, category_by_props)
 
         vehicle['camera_visibility'] = min_vehicle_visibility
-        # vehicle['camera_visibility'] = VISIBLITY_CATEGORY_ENUM['moderate']
     
     return vehicle_list
 
