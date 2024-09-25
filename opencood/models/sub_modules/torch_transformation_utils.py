@@ -8,6 +8,19 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+def warp_affine_simple(src, M, dsize,
+        mode='bilinear',
+        padding_mode='zeros',
+        align_corners=False):
+
+    B, C, H, W = src.size()
+    grid = F.affine_grid(M,
+                         [B, C, dsize[0], dsize[1]],
+                         align_corners=align_corners).to(src)
+    return F.grid_sample(src, grid, align_corners=align_corners)
+
+
 def get_roi_and_cav_mask(shape, cav_mask, spatial_correction_matrix,
                          discrete_ratio, downsample_rate):
     """
