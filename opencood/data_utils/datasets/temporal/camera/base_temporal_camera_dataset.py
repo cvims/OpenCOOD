@@ -2,7 +2,7 @@
 A plain dataset class for cameras
 """
 from opencood.utils import box_utils, camera_utils
-from opencood.data_utils.datasets.temporal.base_scenario_dataset import BaseScenarioDataset
+from opencood.data_utils.datasets.temporal.base_temporal_dataset import BaseTemporalDataset
 from opencood.data_utils.post_processor import build_postprocessor
 from opencood.data_utils.pre_processor import build_preprocessor
 
@@ -10,9 +10,9 @@ from opencood.utils.temporal_utils import filter_vehicles_by_category, update_te
 from opencood.utils.bev_creation import create_bev
 
 
-class BaseScenarioCameraDataset(BaseScenarioDataset):
+class BaseTemporalCameraDataset(BaseTemporalDataset):
     def __init__(self, params, visualize, train=True, validate=False, timestamp_offset: int = 0, **kwargs):
-        super(BaseScenarioCameraDataset, self).__init__(params, visualize, train,
+        super(BaseTemporalCameraDataset, self).__init__(params, visualize, train,
                                                 validate, timestamp_offset=timestamp_offset, **kwargs)
         self.pre_processor = build_preprocessor(params['preprocess'],
                                                 train)
@@ -214,5 +214,5 @@ if __name__ == '__main__':
     #     params['validate_dir'],
     #     pickle.load(open(os.path.join(params['validate_dir'], 'yamls.pkl'), 'rb')))
 
-    dataset = BaseScenarioCameraDataset(params, visualize=False, train=True, validate=False, sensor_cache_container=CAMERA_CONTAINER)
+    dataset = BaseTemporalCameraDataset(params, visualize=False, train=True, validate=False, sensor_cache_container=CAMERA_CONTAINER)
     dataset.get_sample_random(0)

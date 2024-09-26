@@ -10,7 +10,7 @@ from opencood.utils.transformation_utils import calculate_prev_pose_offset
 from opencood.data_utils.datasets.basedataset import BaseDataset
 
 
-class BaseScenarioDataset(BaseDataset):
+class BaseTemporalDataset(BaseDataset):
     """
     Base dataset for all kinds of fusion. Mainly used to assign correct
     index. Additionally, it samples multiple frames for each scenario ().
@@ -54,7 +54,7 @@ class BaseScenarioDataset(BaseDataset):
         
         self.sensor_cache_container = kwargs.get('sensor_cache_container', None)
 
-        super(BaseScenarioDataset, self).__init__(params, visualize, train, validate, **kwargs)
+        super(BaseTemporalDataset, self).__init__(params, visualize, train, validate, **kwargs)
 
 
     def __len__(self):

@@ -10,10 +10,10 @@ from opencood.utils.pcd_utils import \
     mask_points_by_range, mask_ego_points, shuffle_points
 from opencood.utils.temporal_utils import filter_vehicles_by_category, update_temporal_vehicles_list
 from opencood.utils import box_utils
-from opencood.data_utils.datasets.temporal.lidar.base_scenario_lidar_dataset import BaseScenarioLidarDataset
+from opencood.data_utils.datasets.temporal.lidar.base_temporal_lidar_dataset import BaseTemporalLidarDataset
 
 
-class LidarScenarioIntermediateFusionDataset(BaseScenarioLidarDataset):
+class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
     def __init__(
             self,
             params,
@@ -21,7 +21,7 @@ class LidarScenarioIntermediateFusionDataset(BaseScenarioLidarDataset):
             train=True,
             validate=False,
             **kwargs):
-        super(LidarScenarioIntermediateFusionDataset, self).__init__(
+        super(TemporalLidarIntermediateFusionDataset, self).__init__(
             params,
             visualize,
             train,
@@ -209,6 +209,11 @@ class LidarScenarioIntermediateFusionDataset(BaseScenarioLidarDataset):
                 'cav_ids': cav_ids,
                 'prev_pose_offsets': prev_pose_offsets
             })
+
+            if self.visualize:
+                processed_data_dict['ego'].update({'origin_lidar':
+                    np.vstack(
+                        projected_lidar_stack)})
 
             scenario_processed.append(processed_data_dict)
     
@@ -504,6 +509,24 @@ class LidarScenarioIntermediateFusionDataset(BaseScenarioLidarDataset):
             vehicle_offsets=vehicle_offsets_batch
         )
 
+    def collate_batch_test(self, batch):
+        assert len(batch) <= 1, "Batch size 1 is required during testing!"
+        output_dict = self.collate_batch(batch)
+
+        # check if anchor box in the batch
+        for i in range(len(batch[0])):
+            if batch[0][i]['ego']['anchor_box'] is not None:
+                output_dict['anchor_box'][0][i] = torch.from_numpy(np.array(
+                        batch[0][i]['ego'][
+                            'anchor_box']))
+
+            # save the transformation matrix (4, 4) to ego vehicle
+            transformation_matrix_torch = \
+                torch.from_numpy(np.identity(4)).float()
+            output_dict['transformation_matrix'][0][i] = transformation_matrix_torch
+
+        return output_dict
+
 
 
 
@@ -515,7 +538,7 @@ if __name__ == '__main__':
     params = load_yaml(config_file)
     params
 
-    dataset = LidarScenarioIntermediateFusionDataset(params, visualize=False, train=True, validate=False)
+    dataset = TemporalLidarIntermediateFusionDataset(params, visualize=False, train=True, validate=False)
 
     batch1 = dataset.__getitem__(200)
     batch2 = dataset.__getitem__(201)

@@ -7,10 +7,10 @@ import numpy as np
 import torch
 
 from opencood.utils.common_utils import vehicle_in_bev_range
-from opencood.data_utils.datasets.temporal.camera.base_scenario_camera_dataset import BaseScenarioCameraDataset
+from opencood.data_utils.datasets.temporal.camera.base_temporal_camera_dataset import BaseTemporalCameraDataset
 
 
-class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
+class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
     def __init__(
             self,
             params,
@@ -18,7 +18,7 @@ class CamScenarioIntermediateFusionDataset(BaseScenarioCameraDataset):
             train=True,
             validate=False,
             **kwargs):
-        super(CamScenarioIntermediateFusionDataset, self).__init__(
+        super(TemporalCameraBEVIntermediateFusionDataset, self).__init__(
             params,
             visualize,
             train,
@@ -530,7 +530,7 @@ if __name__ == '__main__':
     config_file = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/aaa_test_camera.yaml'
     params = load_yaml(config_file)
 
-    dataset = CamScenarioIntermediateFusionDataset(params, visualize=False, train=True, validate=False)
+    dataset = TemporalCameraBEVIntermediateFusionDataset(params, visualize=False, train=True, validate=False)
 
     test = dataset.__getitem__(200)
     test = dataset.collate_batch([test])
