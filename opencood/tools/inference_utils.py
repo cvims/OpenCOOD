@@ -12,7 +12,7 @@ import torch
 from opencood.utils.common_utils import torch_tensor_to_numpy
 
 
-def inference_late_fusion(batch_data, model, dataset):
+def inference_late_fusion(batch_data, model, dataset, return_object_criteria=False):
     """
     Model inference for late fusion.
 
@@ -34,14 +34,19 @@ def inference_late_fusion(batch_data, model, dataset):
     for cav_id, cav_content in batch_data.items():
         output_dict[cav_id] = model(cav_content)
 
-    pred_box_tensor, pred_score, gt_box_tensor = \
-        dataset.post_process(batch_data,
+    if return_object_criteria:
+        pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping = \
+            dataset.post_process(batch_data,
                              output_dict)
+        return pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping
+    else:
+        pred_box_tensor, pred_score, gt_box_tensor = \
+            dataset.post_process(batch_data,
+                                output_dict)
+        return pred_box_tensor, pred_score, gt_box_tensor
 
-    return pred_box_tensor, pred_score, gt_box_tensor
 
-
-def inference_early_fusion(batch_data, model, dataset):
+def inference_early_fusion(batch_data, model, dataset, return_object_criteria=False):
     """
     Model inference for early fusion.
 
@@ -59,18 +64,25 @@ def inference_early_fusion(batch_data, model, dataset):
         The tensor of gt bounding box.
     """
     output_dict = OrderedDict()
-    cav_content = batch_data['ego']
+    cav_content = batch_data
 
     output_dict['ego'] = model(cav_content)
 
-    pred_box_tensor, pred_score, gt_box_tensor = \
-        dataset.post_process(batch_data,
-                             output_dict)
+    if return_object_criteria:
+        pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping = \
+            dataset.post_process(batch_data[0],
+                                output_dict,
+                                return_object_criteria=True)
+        return pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping
+    else:
+        pred_box_tensor, pred_score, gt_box_tensor = \
+            dataset.post_process(batch_data[0],
+                                output_dict,
+                                return_object_criteria=False)
+        return pred_box_tensor, pred_score, gt_box_tensor
 
-    return pred_box_tensor, pred_score, gt_box_tensor
 
-
-def inference_intermediate_fusion(batch_data, model, dataset):
+def inference_intermediate_fusion(batch_data, model, dataset, return_object_criteria=False):
     """
     Model inference for early fusion.
 
@@ -87,7 +99,7 @@ def inference_intermediate_fusion(batch_data, model, dataset):
     gt_box_tensor : torch.Tensor
         The tensor of gt bounding box.
     """
-    return inference_early_fusion(batch_data, model, dataset)
+    return inference_early_fusion(batch_data, model, dataset, return_object_criteria)
 
 
 def save_prediction_gt(pred_tensor, gt_tensor, pcd, timestamp, save_path):

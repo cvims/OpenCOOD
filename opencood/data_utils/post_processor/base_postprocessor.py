@@ -42,7 +42,7 @@ class BasePostprocessor(object):
     def generate_label(self, *argv):
         return None
 
-    def generate_gt_bbx(self, data_dict):
+    def generate_gt_bbx(self, data_dict, return_object_criteria=False):
         """
         The base postprocessor will generate 3d groundtruth bounding box.
 
@@ -59,6 +59,10 @@ class BasePostprocessor(object):
         gt_box3d_list = []
         # used to avoid repetitive bounding box
         object_id_list = []
+
+        if return_object_criteria:
+            frame_object_visibility_mapping = {}
+            temporal_object_visibility_mapping = {}
 
         for cav_id, cav_content in data_dict.items():
             # used to project gt bounding box to ego space
@@ -79,7 +83,15 @@ class BasePostprocessor(object):
             gt_box3d_list.append(projected_object_bbx_corner)
 
             # append the corresponding ids
-            object_id_list += object_ids
+            for _object_id_list in object_ids:
+                object_id_list += _object_id_list
+
+            if return_object_criteria:
+                # append the visibility information
+                for frame_o_v_mapping in cav_content['frame_object_visibility_mapping']:
+                    frame_object_visibility_mapping.update(frame_o_v_mapping)
+                for temporal_o_v_mapping in cav_content['temporal_object_visibility_mapping']:
+                    temporal_object_visibility_mapping.update(temporal_o_v_mapping)
 
         # gt bbx 3d
         gt_box3d_list = torch.vstack(gt_box3d_list)
@@ -92,6 +104,20 @@ class BasePostprocessor(object):
         mask = \
             box_utils.get_mask_for_boxes_within_range_torch(gt_box3d_tensor)
         gt_box3d_tensor = gt_box3d_tensor[mask, :, :]
+
+        if return_object_criteria:
+            # filter the visibility information - use indices from object_id_list
+            selected_frame_object_visibility_mapping = {}
+            selected_temporal_object_visibility_mapping = {}
+            selected_object_id_list = set()
+            for l, m in zip(object_id_list, mask):
+                if m:
+                    selected_object_id_list.add(l)
+            for key in set(selected_object_id_list):
+                selected_frame_object_visibility_mapping[key] = frame_object_visibility_mapping[key]
+                selected_temporal_object_visibility_mapping[key] = temporal_object_visibility_mapping[key]
+
+            return gt_box3d_tensor, selected_frame_object_visibility_mapping, selected_temporal_object_visibility_mapping
 
         return gt_box3d_tensor
 

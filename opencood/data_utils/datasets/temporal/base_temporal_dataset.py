@@ -147,32 +147,32 @@ class BaseTemporalDataset(BaseDataset):
                     data[cav_id]['camera_np'] = \
                         load_rgb_from_files(cav_content[timestamp_key_delay]['cameras'], self.sensor_cache_container)                    
 
-                # add previous bev information
-                if i == 0:
-                    data[cav_id]['prev_bev_exists'] = False  # Could also be True (see prev_bev_exists), but we keep the first always False
-                    data[cav_id]['prev_pose_offset'] = np.eye(4)
-                    # if queue length is set to 1, use the previous frame (if possible) to calculate the transformation matrix
-                    if self.queue_length == 1:
-                        # offset between current and previous frame
-                        # -1 because we want the previous frame and - timestamp offset (which is the skips in between the frames)
-                        prev_timestamp_index = max(0, timestamp_index_delay - timestamp_offset - 1)
-                        prev_timestamp_index_key = self.return_timestamp_key(scenario_database, prev_timestamp_index)
+                # # add previous bev information
+                # if i == 0:
+                #     data[cav_id]['prev_bev_exists'] = False  # Could also be True (see prev_bev_exists), but we keep the first always False
+                #     data[cav_id]['prev_pose_offset'] = np.eye(4)
+                #     # if queue length is set to 1, use the previous frame (if possible) to calculate the transformation matrix
+                #     if self.queue_length == 1:
+                #         # offset between current and previous frame
+                #         # -1 because we want the previous frame and - timestamp offset (which is the skips in between the frames)
+                #         prev_timestamp_index = max(0, timestamp_index_delay - timestamp_offset - 1)
+                #         prev_timestamp_index_key = self.return_timestamp_key(scenario_database, prev_timestamp_index)
 
-                        if prev_timestamp_index >= timestamp_index_delay:
-                            data[cav_id]['prev_bev_exists'] = False
-                            data[cav_id]['prev_pose_offset'] = np.eye(4)
-                        else:
-                            prev_cav_data = dict()
-                            prev_cav_data['params'] = self.reform_lidar_param(
-                                cav_content, ego_cav_content,
-                                prev_timestamp_index_key, prev_timestamp_index_key, cur_ego_pose_flag
-                            )
-                            data[cav_id]['prev_bev_exists'] = True
-                            data[cav_id]['prev_pose_offset'] = calculate_prev_pose_offset(data[cav_id], prev_cav_data)
-                else:
-                    data[cav_id]['prev_bev_exists'] = prev_bev_exist
-                    data[cav_id]['prev_pose_offset'] = calculate_prev_pose_offset(
-                        data[cav_id], data_queue[i - 1][cav_id])
+                #         if prev_timestamp_index >= timestamp_index_delay:
+                #             data[cav_id]['prev_bev_exists'] = False
+                #             data[cav_id]['prev_pose_offset'] = np.eye(4)
+                #         else:
+                #             prev_cav_data = dict()
+                #             prev_cav_data['params'] = self.reform_lidar_param(
+                #                 cav_content, ego_cav_content,
+                #                 prev_timestamp_index_key, prev_timestamp_index_key, cur_ego_pose_flag
+                #             )
+                #             data[cav_id]['prev_bev_exists'] = True
+                #             data[cav_id]['prev_pose_offset'] = calculate_prev_pose_offset(data[cav_id], prev_cav_data)
+                # else:
+                #     data[cav_id]['prev_bev_exists'] = prev_bev_exist
+                #     data[cav_id]['prev_pose_offset'] = calculate_prev_pose_offset(
+                #         data[cav_id], data_queue[i - 1][cav_id])
 
             data_queue.append(data)
 

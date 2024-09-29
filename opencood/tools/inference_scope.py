@@ -48,6 +48,13 @@ def test_parser():
     return opt
 
 
+def create_result_stat_dict():
+    result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0, 'score': []},
+                   0.5: {'tp': [], 'fp': [], 'gt': 0, 'score': []},
+                   0.7: {'tp': [], 'fp': [], 'gt': 0, 'score': []}}
+    return result_stat
+
+
 def main():
     opt = test_parser()
     assert opt.fusion_method in ['late', 'early', 'intermediate']
@@ -62,7 +69,7 @@ def main():
     print(f"{len(opencood_dataset)} samples found.")
     data_loader = DataLoader(opencood_dataset,
                              batch_size=1,
-                             num_workers=1,
+                             num_workers=16,
                              collate_fn=opencood_dataset.collate_batch_test,
                              shuffle=False,
                              pin_memory=False,
@@ -82,9 +89,8 @@ def main():
 
     # Create the dictionary for evaluation.
     # also store the confidence score for each prediction
-    result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
-                   0.5: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
-                   0.7: {'tp': [], 'fp': [], 'gt': 0, 'score': []}}
+    result_stats_levels = ['all', 'easy'] #, 'moderate', 'hard', 'very_hard']
+    result_stats = {level: create_result_stat_dict() for level in result_stats_levels}
 
     if opt.show_sequence:
         vis = o3d.visualization.Visualizer()
@@ -103,44 +109,77 @@ def main():
             vis_aabbs_gt.append(o3d.geometry.LineSet())
             vis_aabbs_pred.append(o3d.geometry.LineSet())
 
-    for i, batch_data in tqdm(enumerate(data_loader)):
+    for i, batch_data in tqdm(enumerate(data_loader), total=len(data_loader)):
         # print(i)
         with torch.no_grad():
             batch_data = train_utils.to_device(batch_data, device)
             if opt.fusion_method == 'late':
-                pred_box_tensor, pred_score, gt_box_tensor = \
+                pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping = \
                     inference_utils.inference_late_fusion(batch_data,
                                                           model,
-                                                          opencood_dataset)
+                                                          opencood_dataset,
+                                                          return_object_criteria=True)
             elif opt.fusion_method == 'early':
-                pred_box_tensor, pred_score, gt_box_tensor = \
+                pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping = \
                     inference_utils.inference_early_fusion(batch_data,
                                                            model,
-                                                           opencood_dataset)
+                                                           opencood_dataset,
+                                                           return_object_criteria=True)
             elif opt.fusion_method == 'intermediate':
-                pred_box_tensor, pred_score, gt_box_tensor = \
+                pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping = \
                     inference_utils.inference_intermediate_fusion(batch_data,
                                                                   model,
-                                                                  opencood_dataset)
+                                                                  opencood_dataset,
+                                                                  return_object_criteria=True)
             else:
                 raise NotImplementedError('Only early, late and intermediate'
                                           'fusion is supported.')
 
-            eval_utils.caluclate_tp_fp(pred_box_tensor,
-                                       pred_score,
-                                       gt_box_tensor,
-                                       result_stat,
-                                       0.3)
-            eval_utils.caluclate_tp_fp(pred_box_tensor,
-                                       pred_score,
-                                       gt_box_tensor,
-                                       result_stat,
-                                       0.5)
-            eval_utils.caluclate_tp_fp(pred_box_tensor,
-                                       pred_score,
-                                       gt_box_tensor,
-                                       result_stat,
-                                       0.7)
+            for criteria, result_stat_dict in result_stats.items():
+                # filter prediction and gt bounding box by difficulty
+                criteria_level = 0
+                if criteria == 'easy':
+                    criteria_level = 0
+                elif criteria == 'moderate':
+                    criteria_level = 1
+                elif criteria == 'hard':
+                    criteria_level = 2
+                elif criteria == 'very_hard':
+                    criteria_level = 3
+                else:
+                    criteria_level = -1  # all
+                
+                # filter the gt_box by difficulty
+                if criteria_level == -1:
+                    filtered_gt_box_tensor = gt_box_tensor
+                else:
+                    selected_ids = []
+                    selected_object_ids = set()
+                    for i, sel_id in enumerate(temporal_object_visibility_mapping):
+                        if temporal_object_visibility_mapping[sel_id] == criteria_level:
+                            selected_ids.append(i)
+                            selected_object_ids.add(sel_id)
+                    
+                    filtered_gt_box_tensor = gt_box_tensor[selected_ids]
+                
+                eval_utils.caluclate_tp_fp(
+                    pred_box_tensor,
+                    pred_score,
+                    filtered_gt_box_tensor,
+                    result_stat_dict,
+                    0.3)
+                eval_utils.caluclate_tp_fp(
+                    pred_box_tensor,
+                    pred_score,
+                    filtered_gt_box_tensor,
+                    result_stat_dict,
+                    0.5)
+                eval_utils.caluclate_tp_fp(
+                    pred_box_tensor,
+                    pred_score,
+                    filtered_gt_box_tensor,
+                    result_stat_dict,
+                    0.7)
             if opt.save_npy:
                 npy_save_path = os.path.join(opt.model_dir, 'npy')
                 if not os.path.exists(npy_save_path):
@@ -200,9 +239,11 @@ def main():
                 vis.update_renderer()
                 time.sleep(0.001)
 
-    eval_utils.eval_final_results(result_stat,
-                                  opt.model_dir,
-                                  opt.global_sort_detections)
+    for criteria, result_stat_dict in result_stats.items():
+        print(f'Eval results for {criteria} level:')
+        eval_utils.eval_final_results(result_stat_dict,
+                                      opt.model_dir,
+                                      opt.global_sort_detections)
     if opt.show_sequence:
         vis.destroy_window()
 

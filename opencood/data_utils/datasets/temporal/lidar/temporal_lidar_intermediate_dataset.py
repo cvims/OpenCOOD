@@ -7,7 +7,8 @@ import numpy as np
 import torch
 
 from opencood.utils.pcd_utils import \
-    mask_points_by_range, mask_ego_points, shuffle_points
+    mask_points_by_range, mask_ego_points, shuffle_points, \
+    downsample_lidar_minimum
 from opencood.utils.temporal_utils import filter_vehicles_by_category, update_temporal_vehicles_list
 from opencood.utils import box_utils
 from opencood.data_utils.datasets.temporal.lidar.base_temporal_lidar_dataset import BaseTemporalLidarDataset
@@ -137,7 +138,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                     projected_lidar_stack.append(
                         selected_cav_processed['projected_lidar'])
                 
-                prev_pose_offsets.append(selected_cav_base['prev_pose_offset'])
+                # prev_pose_offsets.append(selected_cav_base['prev_pose_offset'])
                 cav_ids.append(cav_id)
             
             all_in_range_vehicles.append(ego_range_vehicles)
@@ -149,14 +150,20 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
             all_visible_vehicles.append(unique_object_ids)
 
-            visible_vehicle_ids = self.create_temporal_gt_stack(
+            # temporal gt stack vehicles
+            temporal_gt_stack = self.create_temporal_gt_stack(
                 all_in_range_vehicles
             )
+
+            visible_vehicle_ids = list(temporal_gt_stack.keys())
 
             unique_indices = [processed_data['object_ids'].index(x) for x in visible_vehicle_ids]
 
             object_stack = processed_data['object_bbx_center'][unique_indices]
             object_id_stack = visible_vehicle_ids
+
+            frame_object_visibility_mapping = {v_id: temporal_gt_stack[v_id]['lidar_visibility'] for v_id in visible_vehicle_ids}
+            temporal_object_visibility_mapping = {v_id: temporal_gt_stack[v_id]['temporal_min_lidar_visibility'] for v_id in visible_vehicle_ids}
 
             # object_stack = np.vstack(object_stack)
             # object_stack = object_stack[unique_indices]
@@ -191,12 +198,14 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
             spatial_correction_matrix = np.concatenate([spatial_correction_matrix,
                                                     padding_eye], axis=0)
         
-            prev_pose_offsets = np.stack(prev_pose_offsets)
+            # prev_pose_offsets = np.stack(prev_pose_offsets)
 
             processed_data_dict['ego'].update({
                 'object_bbx_center': object_bbx_center,
                 'object_bbx_mask': mask,
                 'object_ids': object_id_stack,
+                'frame_object_visibility_mapping': frame_object_visibility_mapping,
+                'temporal_object_visibility_mapping': temporal_object_visibility_mapping,
                 'anchor_box': anchor_box,
                 'processed_lidar': merged_feature_dict,
                 'label_dict': label_dict,
@@ -207,7 +216,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 'spatial_correction_matrix': spatial_correction_matrix,
                 'pairwise_t_matrix': pairwise_t_matrix,
                 'cav_ids': cav_ids,
-                'prev_pose_offsets': prev_pose_offsets
+                # 'prev_pose_offsets': prev_pose_offsets
             })
 
             if self.visualize:
@@ -258,7 +267,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         temporal_vehicles_list = update_temporal_vehicles_list(all_in_range_vehicles, category_filtered_vehicles)
 
         # return the object ids of the temporal vehicles
-        return list(temporal_vehicles_list[-1].keys())
+        return temporal_vehicles_list[-1]
         
 
     def get_item_single_car(self, selected_cav_base, ego_pose, range_filter=None):
@@ -317,218 +326,369 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         return selected_cav_processed
     
 
+    # def collate_batch(self, batch):
+    #     # Intermediate fusion is different the other two
+    #     object_bbx_center = []
+    #     object_bbx_mask = []
+    #     object_ids = []
+    #     processed_lidar_list = []
+    #     # used to record different scenario
+    #     record_len = []
+    #     label_dict_list = []
+
+    #     # used for PriorEncoding
+    #     velocity = []
+    #     time_delay = []
+    #     infra = []
+
+    #     # used for correcting the spatial transformation between delayed timestamp
+    #     # and current timestamp
+    #     spatial_correction_matrix_list = []
+
+    #     # pairwise transformation matrix
+    #     pairwise_t_matrix_list = []
+
+    #     prior_encoding = []
+
+    #     ego_transformation_matrix_list = []
+    #     anchor_box_list = []
+
+    #     origin_lidar_list = []
+
+    #     cav_ids_batch = []
+
+    #     vehicle_offsets_batch = []
+
+    #     for i in range(len(batch)):
+    #         scenarios = batch[i]
+
+    #         object_bbx_center_scenario = []
+    #         object_bbx_mask_scenario = []
+    #         object_ids_scenario = []
+    #         processed_lidar_list_scenario = []
+    #         record_len_scenario = []
+    #         label_dict_list_scenario = []
+
+    #         velocity_scenario = []
+    #         time_delay_scenario = []
+    #         infra_scenario = []      
+
+    #         spatial_correction_matrix_list_scenario = []
+    #         pairwise_t_matrix_list_scenario = []
+
+    #         spatial_correction_matrix_list_scenario = []
+
+    #         prior_encoding_scenario = []
+
+    #         # always identity matrix is added
+    #         ego_transformation_matrix_scenario = []
+
+    #         anchor_box_scenario = []
+            
+    #         origin_lidar_scenario = []
+
+    #         cav_ids_scenario = []
+
+    #         vehicle_offsets_scenario = []
+
+    #         for j, scenario in enumerate(scenarios):
+    #             ego_dict = scenario['ego']
+    #             cav_ids = ego_dict['cav_ids']
+
+    #             object_bbx_center_scenario.append(ego_dict['object_bbx_center'])
+    #             object_bbx_mask_scenario.append(ego_dict['object_bbx_mask'])
+    #             object_ids_scenario.append(ego_dict['object_ids'])
+
+    #             processed_lidar_list_scenario.append(ego_dict['processed_lidar'])
+    #             record_len_scenario.append(ego_dict['cav_num'])
+    #             label_dict_list_scenario.append(ego_dict['label_dict'])
+
+    #             velocity_scenario.append(ego_dict['velocity'])
+    #             time_delay_scenario.append(ego_dict['time_delay'])
+    #             infra_scenario.append(ego_dict['infra'])
+    #             spatial_correction_matrix_list_scenario.append(ego_dict['spatial_correction_matrix'])
+    #             pairwise_t_matrix_list_scenario.append(ego_dict['pairwise_t_matrix'])
+
+    #             ego_transformation_matrix_scenario.append(torch.from_numpy(np.identity(4)).float())
+    #             anchor_box_scenario.append(torch.from_numpy(np.array(ego_dict['anchor_box'])))
+
+    #             if self.visualize:
+    #                 origin_lidar_scenario.append(torch.from_numpy(ego_dict['origin_lidar']))
+
+    #             cav_ids_scenario.append(cav_ids)
+    #             vehicle_offsets_scenario.append(
+    #                 {
+    #                     cav_id: torch.from_numpy(ego_dict['prev_pose_offsets'][i]).float()
+    #                     for i, cav_id in enumerate(cav_ids)
+    #                 }
+    #             )
+
+    #         # convert to numpy, (B, max_num, 7)
+    #         # convert to list of (1, max_num, 7)
+    #         object_bbx_center_scenario = [torch.from_numpy(np.array(x)).unsqueeze(0) for x in object_bbx_center_scenario]
+    #         object_bbx_mask_scenario = [torch.from_numpy(np.array(x)).unsqueeze(0) for x in object_bbx_mask_scenario]
+
+    #         # processed_lidar_list_scenario = [[f_dict] for f_dict in processed_lidar_list_scenario]
+    #         # processed_lidar_list_scenario = [self.merge_features_to_dict(f_scenario) for f_scenario in processed_lidar_list_scenario]
+    #         # processed_lidar_list_scenario = [self.pre_processor.collate_batch(f_scenario) for f_scenario in processed_lidar_list_scenario]
+
+    #         record_len_scenario = [torch.from_numpy(np.array([record_len], dtype=int)) for record_len in record_len_scenario]
+
+    #         # label_dict_list_scenario = [self.post_processor.collate_batch([l_scenario]) for l_scenario in label_dict_list_scenario]
+
+    #         # (B, max_cav)
+    #         pairwise_t_matrix_list_scenario = [torch.from_numpy(np.array(pairwise_t_matrix)).unsqueeze(0) for pairwise_t_matrix in pairwise_t_matrix_list_scenario]
+    #         velocity_scenario = [torch.from_numpy(np.array(velocity)).unsqueeze(0) for velocity in velocity_scenario]
+    #         time_delay_scenario = [torch.from_numpy(np.array(time_delay)).unsqueeze(0) for time_delay in time_delay_scenario]
+    #         infra_scenario = [torch.from_numpy(np.array(infra)).unsqueeze(0) for infra in infra_scenario]
+    #         spatial_correction_matrix_list_scenario = [torch.from_numpy(np.array(spatial_correction_matrix)).unsqueeze(0) for spatial_correction_matrix in spatial_correction_matrix_list_scenario]
+
+    #         # (B, max_cav, 3)
+    #         prior_encoding_scenario = [torch.stack([velocity_scenario[i], time_delay_scenario[i], infra_scenario[i]], dim=-1).float() for i in range(len(velocity_scenario))]
+
+    #         # if self.visualize:
+    #         #     origin_lidar = \
+    #         #         np.array(origin_lidar)
+    #         #     origin_lidar_scenario.append(torch.from_numpy(origin_lidar))
+
+    #         # add them to the lists
+    #         object_bbx_center.append(object_bbx_center_scenario)
+    #         object_bbx_mask.append(object_bbx_mask_scenario)
+    #         object_ids.append(object_ids_scenario)
+    #         processed_lidar_list.append(processed_lidar_list_scenario)
+    #         record_len.append(record_len_scenario)
+    #         label_dict_list.append(label_dict_list_scenario)
+    #         velocity.append(velocity_scenario)
+    #         time_delay.append(time_delay_scenario)
+    #         infra.append(infra_scenario)
+    #         spatial_correction_matrix_list.append(spatial_correction_matrix_list_scenario)
+    #         pairwise_t_matrix_list.append(pairwise_t_matrix_list_scenario)
+    #         prior_encoding.append(prior_encoding_scenario)
+    #         ego_transformation_matrix_list.append(ego_transformation_matrix_scenario)
+    #         anchor_box_list.append(anchor_box_scenario)
+    #         origin_lidar_list.append(origin_lidar_scenario)
+
+    #         cav_ids_batch.append(cav_ids_scenario)
+    #         vehicle_offsets_batch.append(vehicle_offsets_scenario)
+
+    #     # swap batch dim and scenario dim
+    #     object_bbx_center = list(map(list, zip(*object_bbx_center)))
+    #     object_bbx_center = [torch.cat(x, dim=0) for x in object_bbx_center]
+
+    #     object_bbx_mask = list(map(list, zip(*object_bbx_mask)))
+    #     object_bbx_mask = [torch.cat(x, dim=0) for x in object_bbx_mask]
+
+    #     object_ids = list(map(list, zip(*object_ids)))
+
+    #     record_len = list(map(list, zip(*record_len)))
+    #     record_len = [torch.stack(record_len_scenario, dim=0) for record_len_scenario in record_len]
+
+    #     label_dict_list = list(map(list, zip(*label_dict_list)))
+    #     # iterate scenarios and process batches
+    #     for i, batched_label_dict in enumerate(label_dict_list):
+    #         label_dict_list[i] = self.post_processor.collate_batch(batched_label_dict)
+            
+    #     processed_lidar_list = list(map(list, zip(*processed_lidar_list)))
+    #     for i, batched_processed_lidar in enumerate(processed_lidar_list):
+    #         processed_lidar_list[i] = self.merge_features_to_dict(batched_processed_lidar)
+    #         processed_lidar_list[i] = self.pre_processor.collate_batch(processed_lidar_list[i])
+
+    #     # new_processed_lidar_list = []
+    #     # for i in range(len(processed_lidar_list)):
+    #     #     new_processed_lidar_dict = {}
+    #     #     for feature_name in processed_lidar_list[i][0]:
+    #     #         new_processed_lidar_dict[feature_name] = torch.cat([x[feature_name] for x in processed_lidar_list[i]], dim=0)
+    #     #     new_processed_lidar_list.append(new_processed_lidar_dict)
+
+
+    #     return dict(
+    #         object_bbx_center=object_bbx_center,
+    #         object_bbx_mask=object_bbx_mask,
+    #         processed_lidar=processed_lidar_list,
+    #         record_len=record_len,
+    #         label_dict=label_dict_list,
+    #         object_ids=object_ids,
+    #         prior_encoding=prior_encoding,
+    #         spatial_correction_matrix=spatial_correction_matrix_list,
+    #         pairwise_t_matrix=pairwise_t_matrix_list,
+    #         transformation_matrix=ego_transformation_matrix_list,
+    #         anchor_box=anchor_box_list,
+    #         origin_lidar=origin_lidar_list,
+    #         cav_ids=cav_ids_batch,
+    #         vehicle_offsets=vehicle_offsets_batch
+    #     )
+
+    # def collate_batch_test(self, batch):
+    #     assert len(batch) <= 1, "Batch size 1 is required during testing!"
+    #     output_dict = self.collate_batch(batch)
+
+    #     # check if anchor box in the batch
+    #     for i in range(len(batch[0])):
+    #         if batch[0][i]['ego']['anchor_box'] is not None:
+    #             output_dict['anchor_box'][0][i] = torch.from_numpy(np.array(
+    #                     batch[0][i]['ego'][
+    #                         'anchor_box']))
+
+    #         # save the transformation matrix (4, 4) to ego vehicle
+    #         transformation_matrix_torch = \
+    #             torch.from_numpy(np.identity(4)).float()
+    #         output_dict['transformation_matrix'][0][i] = transformation_matrix_torch
+
+    #     return output_dict
+
     def collate_batch(self, batch):
         # Intermediate fusion is different the other two
-        object_bbx_center = []
-        object_bbx_mask = []
-        object_ids = []
-        processed_lidar_list = []
-        # used to record different scenario
-        record_len = []
-        label_dict_list = []
+        output_dict_list = []
+        # Iteration over the temporal (scenarios)
+        for j in range(len(batch[0])):
+            output_dict = {'ego': {}}
 
-        # used for PriorEncoding
-        velocity = []
-        time_delay = []
-        infra = []
+            object_bbx_center = []
+            object_bbx_mask = []
+            object_ids = []
+            frame_object_visibility_mapping = []
+            temporal_object_visibility_mapping = []
+            processed_lidar_list = []
+            # used to record different scenario
+            record_len = []
+            label_dict_list = []
 
-        # used for correcting the spatial transformation between delayed timestamp
-        # and current timestamp
-        spatial_correction_matrix_list = []
+            # used for PriorEncoding
+            velocity = []
+            time_delay = []
+            infra = []
 
-        # pairwise transformation matrix
-        pairwise_t_matrix_list = []
+            # pairwise transformation matrix
+            pairwise_t_matrix_list = []
 
-        prior_encoding = []
+            # used for correcting the spatial transformation between delayed timestamp
+            # and current timestamp
+            spatial_correction_matrix_list = []
 
-        ego_transformation_matrix_list = []
-        anchor_box_list = []
+            if self.visualize:
+                origin_lidar = []
 
-        origin_lidar_list = []
+            # Batch iteration itself
+            for i in range(len(batch)):
+                ego_dict = batch[i][j]['ego']
+                object_bbx_center.append(ego_dict['object_bbx_center'])
+                object_bbx_mask.append(ego_dict['object_bbx_mask'])
+                object_ids.append(ego_dict['object_ids'])
 
-        cav_ids_batch = []
+                # new
+                frame_object_visibility_mapping.append(ego_dict['frame_object_visibility_mapping'])
+                temporal_object_visibility_mapping.append(ego_dict['temporal_object_visibility_mapping'])
 
-        vehicle_offsets_batch = []
+                processed_lidar_list.append(ego_dict['processed_lidar'])
+                record_len.append(ego_dict['cav_num'])
+                label_dict_list.append(ego_dict['label_dict'])
 
-        for i in range(len(batch)):
-            scenarios = batch[i]
-
-            object_bbx_center_scenario = []
-            object_bbx_mask_scenario = []
-            object_ids_scenario = []
-            processed_lidar_list_scenario = []
-            record_len_scenario = []
-            label_dict_list_scenario = []
-
-            velocity_scenario = []
-            time_delay_scenario = []
-            infra_scenario = []      
-
-            spatial_correction_matrix_list_scenario = []
-            pairwise_t_matrix_list_scenario = []
-
-            spatial_correction_matrix_list_scenario = []
-
-            prior_encoding_scenario = []
-
-            # always identity matrix is added
-            ego_transformation_matrix_scenario = []
-
-            anchor_box_scenario = []
-            
-            origin_lidar_scenario = []
-
-            cav_ids_scenario = []
-
-            vehicle_offsets_scenario = []
-
-            for j, scenario in enumerate(scenarios):
-                ego_dict = scenario['ego']
-                cav_ids = ego_dict['cav_ids']
-
-                object_bbx_center_scenario.append(ego_dict['object_bbx_center'])
-                object_bbx_mask_scenario.append(ego_dict['object_bbx_mask'])
-                object_ids_scenario.append(ego_dict['object_ids'])
-
-                processed_lidar_list_scenario.append(ego_dict['processed_lidar'])
-                record_len_scenario.append(ego_dict['cav_num'])
-                label_dict_list_scenario.append(ego_dict['label_dict'])
-
-                velocity_scenario.append(ego_dict['velocity'])
-                time_delay_scenario.append(ego_dict['time_delay'])
-                infra_scenario.append(ego_dict['infra'])
-                spatial_correction_matrix_list_scenario.append(ego_dict['spatial_correction_matrix'])
-                pairwise_t_matrix_list_scenario.append(ego_dict['pairwise_t_matrix'])
-
-                ego_transformation_matrix_scenario.append(torch.from_numpy(np.identity(4)).float())
-                anchor_box_scenario.append(torch.from_numpy(np.array(ego_dict['anchor_box'])))
+                velocity.append(ego_dict['velocity'])
+                time_delay.append(ego_dict['time_delay'])
+                infra.append(ego_dict['infra'])
+                spatial_correction_matrix_list.append(
+                    ego_dict['spatial_correction_matrix'])
+                pairwise_t_matrix_list.append(ego_dict['pairwise_t_matrix'])
 
                 if self.visualize:
-                    origin_lidar_scenario.append(torch.from_numpy(ego_dict['origin_lidar']))
-
-                cav_ids_scenario.append(cav_ids)
-                vehicle_offsets_scenario.append(
-                    {
-                        cav_id: torch.from_numpy(ego_dict['prev_pose_offsets'][i]).float()
-                        for i, cav_id in enumerate(cav_ids)
-                    }
-                )
+                    origin_lidar.append(ego_dict['origin_lidar'])
 
             # convert to numpy, (B, max_num, 7)
-            # convert to list of (1, max_num, 7)
-            object_bbx_center_scenario = [torch.from_numpy(np.array(x)).unsqueeze(0) for x in object_bbx_center_scenario]
-            object_bbx_mask_scenario = [torch.from_numpy(np.array(x)).unsqueeze(0) for x in object_bbx_mask_scenario]
+            object_bbx_center = torch.from_numpy(np.array(object_bbx_center))
+            object_bbx_mask = torch.from_numpy(np.array(object_bbx_mask))
 
-            # processed_lidar_list_scenario = [[f_dict] for f_dict in processed_lidar_list_scenario]
-            # processed_lidar_list_scenario = [self.merge_features_to_dict(f_scenario) for f_scenario in processed_lidar_list_scenario]
-            # processed_lidar_list_scenario = [self.pre_processor.collate_batch(f_scenario) for f_scenario in processed_lidar_list_scenario]
-
-            record_len_scenario = [torch.from_numpy(np.array([record_len], dtype=int)) for record_len in record_len_scenario]
-
-            # label_dict_list_scenario = [self.post_processor.collate_batch([l_scenario]) for l_scenario in label_dict_list_scenario]
+            # example: {'voxel_features':[np.array([1,2,3]]),
+            # np.array([3,5,6]), ...]}
+            merged_feature_dict = self.merge_features_to_dict(processed_lidar_list)
+            processed_lidar_torch_dict = \
+                self.pre_processor.collate_batch(merged_feature_dict)
+            # [2, 3, 4, ..., M]
+            record_len = torch.from_numpy(np.array(record_len, dtype=int))
+            label_torch_dict = \
+                self.post_processor.collate_batch(label_dict_list)
 
             # (B, max_cav)
-            pairwise_t_matrix_list_scenario = [torch.from_numpy(np.array(pairwise_t_matrix)).unsqueeze(0) for pairwise_t_matrix in pairwise_t_matrix_list_scenario]
-            velocity_scenario = [torch.from_numpy(np.array(velocity)).unsqueeze(0) for velocity in velocity_scenario]
-            time_delay_scenario = [torch.from_numpy(np.array(time_delay)).unsqueeze(0) for time_delay in time_delay_scenario]
-            infra_scenario = [torch.from_numpy(np.array(infra)).unsqueeze(0) for infra in infra_scenario]
-            spatial_correction_matrix_list_scenario = [torch.from_numpy(np.array(spatial_correction_matrix)).unsqueeze(0) for spatial_correction_matrix in spatial_correction_matrix_list_scenario]
-
+            velocity = torch.from_numpy(np.array(velocity))
+            time_delay = torch.from_numpy(np.array(time_delay))
+            infra = torch.from_numpy(np.array(infra))
+            spatial_correction_matrix_list = \
+                torch.from_numpy(np.array(spatial_correction_matrix_list))
             # (B, max_cav, 3)
-            prior_encoding_scenario = [torch.stack([velocity_scenario[i], time_delay_scenario[i], infra_scenario[i]], dim=-1).float() for i in range(len(velocity_scenario))]
+            prior_encoding = \
+                torch.stack([velocity, time_delay, infra], dim=-1).float()
+            # (B, max_cav)
+            pairwise_t_matrix = torch.from_numpy(np.array(pairwise_t_matrix_list))
 
-            # if self.visualize:
-            #     origin_lidar = \
-            #         np.array(origin_lidar)
-            #     origin_lidar_scenario.append(torch.from_numpy(origin_lidar))
+            # object id is only used during inference, where batch size is 1.
+            # so here we only get the first element.
+            output_dict['ego'].update({'object_bbx_center': object_bbx_center,
+                                    'object_bbx_mask': object_bbx_mask,
+                                    'processed_lidar': processed_lidar_torch_dict,
+                                    'record_len': record_len,
+                                    'label_dict': label_torch_dict,
+                                    'object_ids': object_ids,
+                                    'frame_object_visibility_mapping': frame_object_visibility_mapping,
+                                    'temporal_object_visibility_mapping': temporal_object_visibility_mapping,
+                                    'prior_encoding': prior_encoding,
+                                    'spatial_correction_matrix': spatial_correction_matrix_list,
+                                    'pairwise_t_matrix': pairwise_t_matrix})
 
-            # add them to the lists
-            object_bbx_center.append(object_bbx_center_scenario)
-            object_bbx_mask.append(object_bbx_mask_scenario)
-            object_ids.append(object_ids_scenario)
-            processed_lidar_list.append(processed_lidar_list_scenario)
-            record_len.append(record_len_scenario)
-            label_dict_list.append(label_dict_list_scenario)
-            velocity.append(velocity_scenario)
-            time_delay.append(time_delay_scenario)
-            infra.append(infra_scenario)
-            spatial_correction_matrix_list.append(spatial_correction_matrix_list_scenario)
-            pairwise_t_matrix_list.append(pairwise_t_matrix_list_scenario)
-            prior_encoding.append(prior_encoding_scenario)
-            ego_transformation_matrix_list.append(ego_transformation_matrix_scenario)
-            anchor_box_list.append(anchor_box_scenario)
-            origin_lidar_list.append(origin_lidar_scenario)
+            if self.visualize:
+                origin_lidar = \
+                    np.array(downsample_lidar_minimum(pcd_np_list=origin_lidar))
+                origin_lidar = torch.from_numpy(origin_lidar)
+                output_dict['ego'].update({'origin_lidar': origin_lidar})
+            output_dict_list.append(output_dict)
 
-            cav_ids_batch.append(cav_ids_scenario)
-            vehicle_offsets_batch.append(vehicle_offsets_scenario)
-
-        # swap batch dim and scenario dim
-        object_bbx_center = list(map(list, zip(*object_bbx_center)))
-        object_bbx_center = [torch.cat(x, dim=0) for x in object_bbx_center]
-
-        object_bbx_mask = list(map(list, zip(*object_bbx_mask)))
-        object_bbx_mask = [torch.cat(x, dim=0) for x in object_bbx_mask]
-
-        object_ids = list(map(list, zip(*object_ids)))
-
-        record_len = list(map(list, zip(*record_len)))
-        record_len = [torch.stack(record_len_scenario, dim=0) for record_len_scenario in record_len]
-
-        label_dict_list = list(map(list, zip(*label_dict_list)))
-        # iterate scenarios and process batches
-        for i, batched_label_dict in enumerate(label_dict_list):
-            label_dict_list[i] = self.post_processor.collate_batch(batched_label_dict)
-            
-        processed_lidar_list = list(map(list, zip(*processed_lidar_list)))
-        for i, batched_processed_lidar in enumerate(processed_lidar_list):
-            processed_lidar_list[i] = self.merge_features_to_dict(batched_processed_lidar)
-            processed_lidar_list[i] = self.pre_processor.collate_batch(processed_lidar_list[i])
-
-        # new_processed_lidar_list = []
-        # for i in range(len(processed_lidar_list)):
-        #     new_processed_lidar_dict = {}
-        #     for feature_name in processed_lidar_list[i][0]:
-        #         new_processed_lidar_dict[feature_name] = torch.cat([x[feature_name] for x in processed_lidar_list[i]], dim=0)
-        #     new_processed_lidar_list.append(new_processed_lidar_dict)
-
-
-        return dict(
-            object_bbx_center=object_bbx_center,
-            object_bbx_mask=object_bbx_mask,
-            processed_lidar=processed_lidar_list,
-            record_len=record_len,
-            label_dict=label_dict_list,
-            object_ids=object_ids,
-            prior_encoding=prior_encoding,
-            spatial_correction_matrix=spatial_correction_matrix_list,
-            pairwise_t_matrix=pairwise_t_matrix_list,
-            transformation_matrix=ego_transformation_matrix_list,
-            anchor_box=anchor_box_list,
-            origin_lidar=origin_lidar_list,
-            cav_ids=cav_ids_batch,
-            vehicle_offsets=vehicle_offsets_batch
-        )
-
+        return output_dict_list
+    
     def collate_batch_test(self, batch):
         assert len(batch) <= 1, "Batch size 1 is required during testing!"
-        output_dict = self.collate_batch(batch)
+        output_dict_list = self.collate_batch(batch)
 
         # check if anchor box in the batch
         for i in range(len(batch[0])):
             if batch[0][i]['ego']['anchor_box'] is not None:
-                output_dict['anchor_box'][0][i] = torch.from_numpy(np.array(
+                output_dict_list[i]['ego'].update({'anchor_box':
+                    torch.from_numpy(np.array(
                         batch[0][i]['ego'][
-                            'anchor_box']))
+                            'anchor_box']))})
 
             # save the transformation matrix (4, 4) to ego vehicle
             transformation_matrix_torch = \
                 torch.from_numpy(np.identity(4)).float()
-            output_dict['transformation_matrix'][0][i] = transformation_matrix_torch
+            output_dict_list[i]['ego'].update({'transformation_matrix':
+                                        transformation_matrix_torch})
 
-        return output_dict
+        return output_dict_list
+    
+    def post_process(self, data_dict, output_dict, return_object_criteria=False):
+        """
+        Process the outputs of the model to 2D/3D bounding box.
 
+        Parameters
+        ----------
+        data_dict : dict
+            The dictionary containing the origin input data of model.
 
+        output_dict :dict
+            The dictionary containing the output of the model.
 
+        Returns
+        -------
+        pred_box_tensor : torch.Tensor
+            The tensor of prediction bounding box after NMS.
+        gt_box_tensor : torch.Tensor
+            The tensor of gt bounding box.
+        """
+        pred_box_tensor, pred_score = \
+            self.post_processor.post_process(data_dict, output_dict)
+        
+        if return_object_criteria:
+            gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping = self.post_processor.generate_gt_bbx(data_dict, return_object_criteria)
+            return pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping
+        else:
+            return pred_box_tensor, pred_score, gt_box_tensor
 
 
 if __name__ == '__main__':

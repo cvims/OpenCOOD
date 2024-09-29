@@ -226,7 +226,7 @@ class PointPillarScope(nn.Module):
         ego_feature_list = [x[0:1,:] for x in regroup_feature_list[0]]
         ego_feature = torch.cat(ego_feature_list,dim=0)
         final_feature = self.late_fusion([temporal_output,ego_feature,fused_feature],psm_temporal,psm_single_v,psm_cross)
-        print('fused_feature:{},final_feature:{}'.format(fused_feature.shape,final_feature.shape))
+        # print('fused_feature:{},final_feature:{}'.format(fused_feature.shape,final_feature.shape))
         
         psm = self.cls_head(final_feature)
         rm = self.reg_head(final_feature)
@@ -235,7 +235,7 @@ class PointPillarScope(nn.Module):
                     'rm': rm
                     }
         output_dict.update(result_dict)
-        print("communication rate:",communication_rates)
+        # print("communication rate:",communication_rates)
         
         output_dict.update({'psm_single_v': psm_single_v,
                        'psm_single_i': psm_single_i,

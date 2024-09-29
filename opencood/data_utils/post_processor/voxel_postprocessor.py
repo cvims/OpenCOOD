@@ -11,7 +11,6 @@ import sys
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 from opencood.data_utils.post_processor.base_postprocessor \
     import BasePostprocessor
@@ -269,7 +268,7 @@ class VoxelPostprocessor(BasePostprocessor):
 
             # classification probability
             prob = output_dict[cav_id]['psm']
-            prob = F.sigmoid(prob.permute(0, 2, 3, 1))
+            prob = torch.sigmoid(prob.permute(0, 2, 3, 1))
             prob = prob.reshape(1, -1)
 
             # regression map

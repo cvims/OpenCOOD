@@ -90,7 +90,7 @@ class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
 
             cav_ids = []
 
-            prev_pose_offsets = []
+            # prev_pose_offsets = []
 
             # loop over all CAVs to process information
             for cav_id, selected_cav_base in data_sample.items():
@@ -102,7 +102,7 @@ class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
                 if cav_id is None and ego_id != cav_id_before:
                     continue
 
-                prev_pose_offsets.append(selected_cav_base['prev_pose_offset'])
+                # prev_pose_offsets.append(selected_cav_base['prev_pose_offset'])
 
                 selected_cav_processed = self.get_single_cav(selected_cav_base)
 
@@ -131,7 +131,7 @@ class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
             transformation_matrix = np.concatenate(
                 [transformation_matrix, padding_eye], axis=0)
 
-            prev_pose_offsets = np.stack(prev_pose_offsets)
+            # prev_pose_offsets = np.stack(prev_pose_offsets)
 
             # create empty gt_static (and expand dim 0)
             gt_static = np.zeros((1, self.bev_image_size, self.bev_image_size))
@@ -145,7 +145,7 @@ class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
                 'camera_extrinsic_self': camera2self,
                 'gt_static': gt_static,
                 'cav_ids': cav_ids,
-                'prev_pose_offsets': prev_pose_offsets,
+                # 'prev_pose_offsets': prev_pose_offsets,
                 'ego_id': int(ego_id),
                 'vehicles': in_range_vehicles
             })
@@ -283,9 +283,9 @@ class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
 
         cav_ids_batch = []
 
-        vehicles_offsets_batch = []
+        # vehicles_offsets_batch = []
 
-        ego_vehicle_offsets_batch = []
+        # ego_vehicle_offsets_batch = []
 
         ego_id_all_batch = []
 
@@ -322,9 +322,9 @@ class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
 
             ego_id_scenario = []
 
-            vehicle_offsets_scenario = []
+            # vehicle_offsets_scenario = []
 
-            ego_vehicle_offsets_scenario = []
+            # ego_vehicle_offsets_scenario = []
             
             for i, scenario in enumerate(scenarios):
                 ego_dict = scenario['ego']
@@ -376,14 +376,14 @@ class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
 
                 cav_ids_scenario.append(cav_ids)
 
-                vehicle_offsets_scenario.append(
-                    {
-                        cav_id: torch.from_numpy(ego_dict['prev_pose_offsets'][i]).float()
-                        for i, cav_id in enumerate(cav_ids)
-                    }
-                )
+                # vehicle_offsets_scenario.append(
+                #     {
+                #         cav_id: torch.from_numpy(ego_dict['prev_pose_offsets'][i]).float()
+                #         for i, cav_id in enumerate(cav_ids)
+                #     }
+                # )
 
-                ego_vehicle_offsets_scenario.append(torch.from_numpy(ego_dict['prev_pose_offsets'][0]).float())
+                # ego_vehicle_offsets_scenario.append(torch.from_numpy(ego_dict['prev_pose_offsets'][0]).float())
         
             # append all scenarios to all batch lists
             cam_rgb_all_batch.append(cam_rgb_all_scenario)
@@ -412,8 +412,8 @@ class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
             record_len.append(record_len_scenario)
 
             cav_ids_batch.append(cav_ids_scenario)
-            vehicles_offsets_batch.append(vehicle_offsets_scenario)
-            ego_vehicle_offsets_batch.append(ego_vehicle_offsets_scenario)
+            # vehicles_offsets_batch.append(vehicle_offsets_scenario)
+            # ego_vehicle_offsets_batch.append(ego_vehicle_offsets_scenario)
 
         # vehicle_location_offsets_batch = self.calculate_vehicle_offsets(cam_extrinsic_self_all_batch, cav_ids_batch)
 
@@ -436,9 +436,9 @@ class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
         # stack record lens
         record_len = [torch.stack(record_len_scenario, dim=0) for record_len_scenario in record_len]
         # same with vehicle offsets
-        vehicles_offsets_batch = list(map(list, zip(*vehicles_offsets_batch)))
+        # vehicles_offsets_batch = list(map(list, zip(*vehicles_offsets_batch)))
         # same with ego vehicle offsets
-        ego_vehicle_offsets_batch = list(map(list, zip(*ego_vehicle_offsets_batch)))
+        # ego_vehicle_offsets_batch = list(map(list, zip(*ego_vehicle_offsets_batch)))
         # same with gt static
         gt_static_all_batch = list(map(list, zip(*gt_static_all_batch)))
         # stack gt static
@@ -496,8 +496,8 @@ class TemporalCameraBEVIntermediateFusionDataset(BaseTemporalCameraDataset):
             'inputs': cam_rgb_all_batch,
             'extrinsic': cam_to_ego_all_batch,
             'intrinsic': cam_intrinsic_all_batch,
-            'vehicle_offsets': vehicles_offsets_batch,
-            'ego_vehicle_offsets': ego_vehicle_offsets_batch,
+            # 'vehicle_offsets': vehicles_offsets_batch,
+            # 'ego_vehicle_offsets': ego_vehicle_offsets_batch,
             'gt_static': gt_static_all_batch,
             'gt_dynamic': gt_temporal_all_batch,
             'full_gt_dynamic': full_gt_temporal_all_batch,
