@@ -11,7 +11,7 @@ from opencood.utils.transformation_utils import x1_to_x2
 from opencood.hypes_yaml.yaml_utils import load_yaml
 from opencood.data_utils.datasets import COM_RANGE
 from opencood.utils import common_utils
-from opencood.utils.temporal_utils import VISIBLITY_CATEGORY_ENUM, categorize_vehicle_visibility_by_camera_props, categorize_vehicle_visibility_by_lidar_hits
+from opencood.utils.temporal_utils import categorize_by_kitti_criteria, KITTI_DETECTION_CATEGORY_ENUM
 
 
 class BaseDataset(Dataset):
@@ -76,13 +76,17 @@ class BaseDataset(Dataset):
         # init scenario folders
         self.scenario_folders = sorted(list(self.all_yamls.keys()))
 
-        detection_criteria = params['detection_criteria']
-        self.camera_detection_criteria = detection_criteria['camera']
-        self.camera_detection_criteria_threshold = VISIBLITY_CATEGORY_ENUM[self.camera_detection_criteria['detection_criteria_threshold']]
-        self.camera_dection_criteria_config = self.camera_detection_criteria['config']
-        self.lidar_detection_criteria = detection_criteria['lidar']
-        self.lidar_detection_criteria_threshold = VISIBLITY_CATEGORY_ENUM[self.lidar_detection_criteria['detection_criteria_threshold']]
-        self.lidar_detection_criteria_config = self.lidar_detection_criteria['config']
+        # detection_criteria = params['detection_criteria']
+        # self.camera_detection_criteria = detection_criteria['camera']
+        # self.camera_detection_criteria_threshold = VISIBLITY_CATEGORY_ENUM[self.camera_detection_criteria['detection_criteria_threshold']]
+        # self.camera_dection_criteria_config = self.camera_detection_criteria['config']
+        # self.lidar_detection_criteria = detection_criteria['lidar']
+        # self.lidar_detection_criteria_threshold = VISIBLITY_CATEGORY_ENUM[self.lidar_detection_criteria['detection_criteria_threshold']]
+        # self.lidar_detection_criteria_config = self.lidar_detection_criteria['config']
+
+        detection_criteria = params['kitti_detection']
+        self.kitti_detection_criteria = detection_criteria['criteria']
+        self.kitti_detection_criteria_threshold = KITTI_DETECTION_CATEGORY_ENUM[detection_criteria['criteria_threshold']]
 
         self.reinitialize()
 
@@ -95,7 +99,7 @@ class BaseDataset(Dataset):
             self.scenario_database.update({i: OrderedDict()})
 
             # at least 1 cav should show up
-            cav_list = [x for x in self.all_yamls[scenario_folder].keys()]
+            cav_list = sorted([x for x in self.all_yamls[scenario_folder].keys()])
             if self.train and not self.validate:
                 # shuffle
                 random.shuffle(cav_list)
@@ -136,8 +140,9 @@ class BaseDataset(Dataset):
 
                     # update the vehicles with the visibility categoryv
                     vehicles = self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles']
-                    self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles'] = categorize_vehicle_visibility_by_camera_props(vehicles, self.camera_dection_criteria_config)
-                    self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles'] = categorize_vehicle_visibility_by_lidar_hits(vehicles, self.lidar_detection_criteria_config)
+                    # self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles'] = categorize_vehicle_visibility_by_camera_props(vehicles, self.camera_dection_criteria_config)
+                    # self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles'] = categorize_vehicle_visibility_by_lidar_hits(vehicles, self.lidar_detection_criteria_config)
+                    self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles'] = categorize_by_kitti_criteria(vehicles, self.kitti_detection_criteria)
 
                 if j == 0:
                     self.scenario_database[i][cav_id]['ego'] = True

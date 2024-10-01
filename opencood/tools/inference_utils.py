@@ -46,7 +46,7 @@ def inference_late_fusion(batch_data, model, dataset, return_object_criteria=Fal
         return pred_box_tensor, pred_score, gt_box_tensor
 
 
-def inference_early_fusion(batch_data, model, dataset, return_object_criteria=False):
+def inference_early_fusion(batch_data, model, dataset):
     """
     Model inference for early fusion.
 
@@ -68,21 +68,14 @@ def inference_early_fusion(batch_data, model, dataset, return_object_criteria=Fa
 
     output_dict['ego'] = model(cav_content)
 
-    if return_object_criteria:
-        pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping = \
-            dataset.post_process(batch_data[0],
-                                output_dict,
-                                return_object_criteria=True)
-        return pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping
-    else:
-        pred_box_tensor, pred_score, gt_box_tensor = \
-            dataset.post_process(batch_data[0],
-                                output_dict,
-                                return_object_criteria=False)
-        return pred_box_tensor, pred_score, gt_box_tensor
+    pred_box_tensor, pred_score, gt_box_tensor, object_detection_info = \
+        dataset.post_process(batch_data[0],
+                            output_dict)
+
+    return pred_box_tensor, pred_score, gt_box_tensor, object_detection_info
 
 
-def inference_intermediate_fusion(batch_data, model, dataset, return_object_criteria=False):
+def inference_intermediate_fusion(batch_data, model, dataset):
     """
     Model inference for early fusion.
 
@@ -99,7 +92,7 @@ def inference_intermediate_fusion(batch_data, model, dataset, return_object_crit
     gt_box_tensor : torch.Tensor
         The tensor of gt bounding box.
     """
-    return inference_early_fusion(batch_data, model, dataset, return_object_criteria)
+    return inference_early_fusion(batch_data, model, dataset)
 
 
 def save_prediction_gt(pred_tensor, gt_tensor, pcd, timestamp, save_path):

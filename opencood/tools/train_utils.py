@@ -15,7 +15,21 @@ import torch
 import torch.optim as optim
 import timm
 
-def load_saved_model(saved_path, model):
+
+def findLastCheckpoint(save_dir):
+    file_list = glob.glob(os.path.join(save_dir, '*epoch*.pth'))
+    if file_list:
+        epochs_exist = []
+        for file_ in file_list:
+            result = re.findall(".*epoch(.*).pth.*", file_)
+            epochs_exist.append(int(result[0]))
+        initial_epoch_ = max(epochs_exist)
+    else:
+        initial_epoch_ = 0
+    return initial_epoch_
+
+
+def load_saved_model(saved_path, model, epoch=None):
     """
     Load saved model if exiseted
 
@@ -33,35 +47,46 @@ def load_saved_model(saved_path, model):
     """
     assert os.path.exists(saved_path), '{} not found'.format(saved_path)
 
-    def findLastCheckpoint(save_dir):
-        if os.path.exists(os.path.join(saved_path, 'latest.pth')):
-            return 10000
-        file_list = glob.glob(os.path.join(save_dir, '*epoch*.pth'))
-        if file_list:
-            epochs_exist = []
-            for file_ in file_list:
-                result = re.findall(".*epoch(.*).pth.*", file_)
-                epochs_exist.append(int(result[0]))
-            initial_epoch_ = max(epochs_exist)
+    if os.path.exists(os.path.join(saved_path, 'net_latest.pth')):
+        model.load_state_dict(torch.load(
+            os.path.join(saved_path,
+                         'net_latest.pth')))
+        return 100, model
+    else:
+        if epoch is None:
+            initial_epoch = findLastCheckpoint(saved_path)
         else:
-            initial_epoch_ = 0
-        return initial_epoch_
+            initial_epoch = int(epoch)
+            
+        if initial_epoch > 0:
+            print('resuming by loading epoch %d' % initial_epoch)
+        
+        state_dict_ = torch.load(os.path.join(saved_path, 'net_epoch%d.pth' % initial_epoch))
+        state_dict = {}
+        # convert data_parallal to model
+        for k in state_dict_:
+            if k.startswith('module') and not k.startswith('module_list'):
+                state_dict[k[7:]] = state_dict_[k]
+            else:
+                state_dict[k] = state_dict_[k]
+        
+        model_state_dict = model.state_dict()
 
-    initial_epoch = findLastCheckpoint(saved_path)
-    if initial_epoch > 0:
-        model_file = os.path.join(saved_path,
-                         'net_epoch%d.pth' % initial_epoch) \
-            if initial_epoch != 10000 else os.path.join(saved_path,
-                         'latest.pth')
-        print('resuming by loading epoch %d' % initial_epoch)
-        checkpoint = torch.load(
-            model_file,
-            map_location='cpu')
-        model.load_state_dict(checkpoint, strict=False)
-
-        del checkpoint
-
-    return initial_epoch, model
+        for k in state_dict:
+            if k in model_state_dict:
+                if state_dict[k].shape != model_state_dict[k].shape:
+                    print('Skip loading parameter {}, required shape{}, ' \
+                        'loaded shape{}.'.format(
+                        k, model_state_dict[k].shape, state_dict[k].shape))
+                    state_dict[k] = model_state_dict[k]
+            else:
+                print('Drop parameter {}.'.format(k))
+        for k in model_state_dict:
+            if not (k in state_dict):
+                print('No param {}.'.format(k))
+                state_dict[k] = model_state_dict[k]
+        model.load_state_dict(state_dict, strict=False)
+        return initial_epoch, model
 
 
 def setup_train(hypes):

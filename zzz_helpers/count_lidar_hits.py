@@ -194,6 +194,13 @@ def save_updated_yaml(cav_yaml_content, additional_yaml_content, vehicle_hits, c
     for v_id in vehicle_yaml_content.keys():
         if v_id in all_vehicle_yaml_content:
             del all_vehicle_yaml_content[v_id]
+
+    # add original flag to yaml
+    for v_id in vehicle_yaml_content.keys():
+        vehicle_yaml_content[v_id]['opv2v_visible'] = True
+    
+    for v_id in all_vehicle_yaml_content.keys():
+        all_vehicle_yaml_content[v_id]['opv2v_visible'] = False
     
     # merge the two dictionaries
     vehicle_yaml_content.update(all_vehicle_yaml_content)
@@ -202,12 +209,12 @@ def save_updated_yaml(cav_yaml_content, additional_yaml_content, vehicle_hits, c
     if int(cav_id) in vehicle_yaml_content:
         del vehicle_yaml_content[int(cav_id)]
 
-    # add lidar hits to the yaml
-    for v_id in vehicle_yaml_content.keys():
-        if v_id in vehicle_hits:
-            vehicle_yaml_content[v_id]['lidar_hits'] = vehicle_hits[v_id]
-        else:
-            vehicle_yaml_content[v_id]['lidar_hits'] = 0
+    # # add lidar hits to the yaml
+    # for v_id in vehicle_yaml_content.keys():
+    #     if v_id in vehicle_hits:
+    #         vehicle_yaml_content[v_id]['lidar_hits'] = vehicle_hits[v_id]
+    #     else:
+    #         vehicle_yaml_content[v_id]['lidar_hits'] = 0
     
     # update vehicle section in new_yaml_content
     new_yaml_content['vehicles'] = vehicle_yaml_content               
@@ -251,31 +258,31 @@ def update_yaml_with_lidar_hits(org_path: str, additional_path: str):
                 cav_path = os.path.join(org_path, folder, cav_id)
                 # load the pcd file
                 pcd_file = os.path.join(cav_path, f'{timestamp}.pcd')
-                pcd = load_pcd_file(pcd_file)
+                # pcd = load_pcd_file(pcd_file)
                 # load cav yaml
                 cav_yaml_file = os.path.join(cav_path, f'{timestamp}.yaml')
                 cav_yaml_content = yaml_utils.load_yaml(cav_yaml_file)
                 lidar_pose = cav_yaml_content['lidar_pose']
 
                 # calculate lidar hits per vehicle
-                vehicle_hits = calculate_lidar_hits(np.asarray(pcd.points), lidar_pose, all_vehicles)
+                # vehicle_hits = calculate_lidar_hits(np.asarray(pcd.points), lidar_pose, all_vehicles)
 
                 # save new yaml file
                 new_yaml_file_path = os.path.join(additional_path, folder, str(cav_id), f'{timestamp}.yaml')
-                save_updated_yaml(cav_yaml_content, additional_yaml_content, vehicle_hits, cav_id, new_yaml_file_path)
-    
-            
+                # save_updated_yaml(cav_yaml_content, additional_yaml_content, vehicle_hits, cav_id, new_yaml_file_path)
+                save_updated_yaml(cav_yaml_content, additional_yaml_content, None, cav_id, new_yaml_file_path)
+
 
 if __name__ == '__main__':
-    # original_path = r'/data/public_datasets/OPV2V/original/train'
-    # additional_path = r'/data/public_datasets/OPV2V/original/train/additional'
+    original_path = r'/data/public_datasets/OPV2V/original/train'
+    additional_path = r'/data/public_datasets/OPV2V/original/train/additional'
 
-    # update_yaml_with_lidar_hits(original_path, additional_path)
+    update_yaml_with_lidar_hits(original_path, additional_path)
 
-    # original_path = r'/data/public_datasets/OPV2V/original/validate'
-    # additional_path = r'/data/public_datasets/OPV2V/original/validate/additional'
+    original_path = r'/data/public_datasets/OPV2V/original/validate'
+    additional_path = r'/data/public_datasets/OPV2V/original/validate/additional'
 
-    # update_yaml_with_lidar_hits(original_path, additional_path)
+    update_yaml_with_lidar_hits(original_path, additional_path)
 
     original_path = r'/data/public_datasets/OPV2V/original/test'
     additional_path = r'/data/public_datasets/OPV2V/original/test/additional'

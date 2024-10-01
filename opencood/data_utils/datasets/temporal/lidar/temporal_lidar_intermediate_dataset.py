@@ -9,7 +9,9 @@ import torch
 from opencood.utils.pcd_utils import \
     mask_points_by_range, mask_ego_points, shuffle_points, \
     downsample_lidar_minimum
-from opencood.utils.temporal_utils import filter_vehicles_by_category, update_temporal_vehicles_list
+from opencood.utils.temporal_utils import filter_vehicles_by_category, \
+    update_temporal_vehicles_list, filter_by_opv2v_original_visibility, \
+    update_kitti_criteria
 from opencood.utils import box_utils
 from opencood.data_utils.datasets.temporal.lidar.base_temporal_lidar_dataset import BaseTemporalLidarDataset
 
@@ -82,7 +84,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
             pairwise_t_matrix = \
                 self.get_pairwise_transformation(data_sample, self.params['train_params']['max_cav'], proj_first=False)
-            
+
             # process all vehicles in ego perspective so that the temporal approach can simply restore them without recalculating
             processed_data = self.get_item_single_car(ego_content, ego_lidar_pose) #, range_filter=self.full_object_range)
             all_processed_data.append(processed_data)
@@ -115,7 +117,15 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                     for v_id in ego_range_vehicles.keys():
                         if v_id == cav_id:
                             continue
-                        ego_range_vehicles[v_id]['lidar_hits'] += selected_cav_base['vehicles'][v_id]['lidar_hits']
+                        # ego_range_vehicles[v_id]['lidar_hits'] += selected_cav_base['vehicles'][v_id]['lidar_hits']
+                        # Update KITTI criteria for cooperative perception
+                        # CAVs can have easier visibility criteria than ego
+                        updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['vehicles'][v_id])
+                        ego_range_vehicles[v_id]['kitti_criteria'] = updated_kitti_criteria['kitti_criteria']
+                        ego_range_vehicles[v_id]['kitti_criteria_props'] = updated_kitti_criteria['kitti_criteria_props']
+                        # opv2v visible
+                        if not ego_range_vehicles[v_id]['opv2v_visible'] and selected_cav_base['vehicles'][v_id]['opv2v_visible']:
+                            ego_range_vehicles[v_id]['opv2v_visible'] = selected_cav_base['vehicles'][v_id]['opv2v_visible']
 
                 object_stack.append(selected_cav_processed['object_bbx_center'])
                 object_id_stack += selected_cav_processed['object_ids']
@@ -152,21 +162,28 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
             # temporal gt stack vehicles
             temporal_gt_stack = self.create_temporal_gt_stack(
-                all_in_range_vehicles
+                [all_in_range_vehicles[-1]]
             )
 
-            visible_vehicle_ids = list(temporal_gt_stack.keys())
+            # all_opv2v_visible_vehicles = []
+            # for v_id in all_in_range_vehicles[-1]:
+            #     if all_in_range_vehicles[-1][v_id]['opv2v_visible']:
+            #         all_opv2v_visible_vehicles.append(v_id)
+
+            visible_vehicle_ids = list(set(temporal_gt_stack.keys()))
 
             unique_indices = [processed_data['object_ids'].index(x) for x in visible_vehicle_ids]
 
             object_stack = processed_data['object_bbx_center'][unique_indices]
             object_id_stack = visible_vehicle_ids
 
-            frame_object_visibility_mapping = {v_id: temporal_gt_stack[v_id]['lidar_visibility'] for v_id in visible_vehicle_ids}
-            temporal_object_visibility_mapping = {v_id: temporal_gt_stack[v_id]['temporal_min_lidar_visibility'] for v_id in visible_vehicle_ids}
-
-            # object_stack = np.vstack(object_stack)
-            # object_stack = object_stack[unique_indices]
+            object_detection_info_mapping = dict()
+            for v_id in visible_vehicle_ids:
+                object_detection_info_mapping[v_id] = dict()
+                object_detection_info_mapping[v_id]['kitti_criteria'] = temporal_gt_stack[v_id]['kitti_criteria']
+                object_detection_info_mapping[v_id]['kitti_criteria_props'] = temporal_gt_stack[v_id]['kitti_criteria_props']
+                object_detection_info_mapping[v_id]['temporal_kitti_criteria'] = temporal_gt_stack[v_id]['temporal_kitti_criteria']
+                object_detection_info_mapping[v_id]['opv2v_visible'] = temporal_gt_stack[v_id]['opv2v_visible']
 
             # make sure bounding boxes across all frames have the same number
             object_bbx_center = \
@@ -204,8 +221,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 'object_bbx_center': object_bbx_center,
                 'object_bbx_mask': mask,
                 'object_ids': object_id_stack,
-                'frame_object_visibility_mapping': frame_object_visibility_mapping,
-                'temporal_object_visibility_mapping': temporal_object_visibility_mapping,
+                'object_detection_info_mapping': object_detection_info_mapping,
                 'anchor_box': anchor_box,
                 'processed_lidar': merged_feature_dict,
                 'label_dict': label_dict,
@@ -262,7 +278,8 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
 
     def create_temporal_gt_stack(self, all_in_range_vehicles):
-        category_filtered_vehicles = [filter_vehicles_by_category(vehicle_list, self.lidar_detection_criteria_threshold, False) for vehicle_list in all_in_range_vehicles]
+        # category_filtered_vehicles = [filter_vehicles_by_category(vehicle_list, self.kitti_detection_criteria_threshold) for vehicle_list in all_in_range_vehicles]
+        category_filtered_vehicles = [filter_by_opv2v_original_visibility(vehicle_list) for vehicle_list in all_in_range_vehicles]
 
         temporal_vehicles_list = update_temporal_vehicles_list(all_in_range_vehicles, category_filtered_vehicles)
 
@@ -546,8 +563,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
             object_bbx_center = []
             object_bbx_mask = []
             object_ids = []
-            frame_object_visibility_mapping = []
-            temporal_object_visibility_mapping = []
+            object_detection_info_mapping_list = []
             processed_lidar_list = []
             # used to record different scenario
             record_len = []
@@ -576,8 +592,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 object_ids.append(ego_dict['object_ids'])
 
                 # new
-                frame_object_visibility_mapping.append(ego_dict['frame_object_visibility_mapping'])
-                temporal_object_visibility_mapping.append(ego_dict['temporal_object_visibility_mapping'])
+                object_detection_info_mapping_list.append(ego_dict['object_detection_info_mapping'])
 
                 processed_lidar_list.append(ego_dict['processed_lidar'])
                 record_len.append(ego_dict['cav_num'])
@@ -627,8 +642,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                                     'record_len': record_len,
                                     'label_dict': label_torch_dict,
                                     'object_ids': object_ids,
-                                    'frame_object_visibility_mapping': frame_object_visibility_mapping,
-                                    'temporal_object_visibility_mapping': temporal_object_visibility_mapping,
+                                    'object_detection_info_mapping': object_detection_info_mapping_list,
                                     'prior_encoding': prior_encoding,
                                     'spatial_correction_matrix': spatial_correction_matrix_list,
                                     'pairwise_t_matrix': pairwise_t_matrix})
@@ -662,7 +676,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
         return output_dict_list
     
-    def post_process(self, data_dict, output_dict, return_object_criteria=False):
+    def post_process(self, data_dict, output_dict):
         """
         Process the outputs of the model to 2D/3D bounding box.
 
@@ -684,11 +698,9 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         pred_box_tensor, pred_score = \
             self.post_processor.post_process(data_dict, output_dict)
         
-        if return_object_criteria:
-            gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping = self.post_processor.generate_gt_bbx(data_dict, return_object_criteria)
-            return pred_box_tensor, pred_score, gt_box_tensor, frame_object_visibility_mapping, temporal_object_visibility_mapping
-        else:
-            return pred_box_tensor, pred_score, gt_box_tensor
+        gt_box_tensor, object_detection_info = self.post_processor.generate_gt_bbx(data_dict)
+        
+        return pred_box_tensor, pred_score, gt_box_tensor, object_detection_info
 
 
 if __name__ == '__main__':

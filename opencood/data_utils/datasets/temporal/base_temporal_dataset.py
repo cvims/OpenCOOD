@@ -54,6 +54,10 @@ class BaseTemporalDataset(BaseDataset):
         
         self.sensor_cache_container = kwargs.get('sensor_cache_container', None)
 
+        # all previous timestamps are with ego data only (no cooperation)
+        # only the current timestamp (last data point) has cooperation
+        self.temporal_ego_only = params['fusion']['args']['temporal_ego_only'] if 'temporal_ego_only' in params['fusion']['args'] else False
+
         super(BaseTemporalDataset, self).__init__(params, visualize, train, validate, **kwargs)
 
 
@@ -95,7 +99,7 @@ class BaseTemporalDataset(BaseDataset):
         else:
             import sys
             sys.exit('Index has to be a int')
-
+        
         ego_cav_content = [cav_content for _, cav_content in scenario_database.items() if cav_content['ego']][0]
 
         data_queue = []
@@ -110,6 +114,10 @@ class BaseTemporalDataset(BaseDataset):
             for cav_id, cav_content in scenario_database.items():
                 if timestamp_key not in cav_content:
                     continue
+
+                if self.temporal_ego_only and i < self.queue_length - 1:
+                    if not cav_content['ego']:
+                        continue
 
                 data[cav_id] = OrderedDict()
                 data[cav_id]['ego'] = cav_content['ego']
@@ -130,10 +138,6 @@ class BaseTemporalDataset(BaseDataset):
                 data[cav_id]['time_delay'] = timestamp_delay
                 data[cav_id]['timestamp_key'] = timestamp_key_delay
 
-                # load the camera transformation matrix to dictionary
-
-                data[cav_id]['camera_params'] = \
-                    self.reform_camera_param(cav_content, ego_cav_content, timestamp_key)
                 # load the lidar params into the dictionary
                 data[cav_id]['params'] = self.reform_lidar_param(
                     cav_content, ego_cav_content,
@@ -144,6 +148,9 @@ class BaseTemporalDataset(BaseDataset):
                         pcd_to_np(cav_content[timestamp_key_delay]['lidar'], self.sensor_cache_container)
 
                 if load_camera_data:
+                    # load the camera transformation matrix to dictionary
+                    data[cav_id]['camera_params'] = \
+                        self.reform_camera_param(cav_content, ego_cav_content, timestamp_key)
                     data[cav_id]['camera_np'] = \
                         load_rgb_from_files(cav_content[timestamp_key_delay]['cameras'], self.sensor_cache_container)                    
 

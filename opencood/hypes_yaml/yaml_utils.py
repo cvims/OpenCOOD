@@ -46,7 +46,9 @@ def load_yaml(file, opt=None, use_cloader=False):
         |[-+]?\\.(?:inf|Inf|INF)
         |\\.(?:nan|NaN|NAN))$''', re.X),
         list(u'-+0123456789.'))
+
     param = yaml.load(stream, Loader=loader)
+
     if "yaml_parser" in param:
         param = eval(param["yaml_parser"])(param)
 

@@ -183,7 +183,7 @@ def calculate_occlusion(bbox, extent, depth_map, window_width, window_height):
         occlusion_mask |= (neighbor_depths < vertex_depth)
 
     # Calculate the area of the bounding box
-    bbox_area = (max_x - min_x) * (max_y - min_y)
+    bbox_area = (max_x - min_x) * (max_y - min_y) + 1e-8
 
     # Check if the area is non-zero before performing the division
     if bbox_area > 0:
@@ -201,7 +201,7 @@ def calculate_truncation(uncropped_bbox, cropped_bbox):
     "Calculate how much of the object’s 2D uncropped bounding box is outside the image boundary"
 
     area_cropped = calc_bbox2d_area(cropped_bbox)
-    area_uncropped = calc_bbox2d_area(uncropped_bbox)
+    area_uncropped = calc_bbox2d_area(uncropped_bbox) + 1e-8
     truncation = 1.0 - float(area_cropped / area_uncropped)
     return truncation
 

@@ -133,7 +133,12 @@ class PointPillarScope(nn.Module):
         feature_2d_list = []  
         matrix_list = []
         regroup_feature_list = []  
-        regroup_feature_list_large = []  
+        regroup_feature_list_large = []
+
+        # SCOPE loads the data from latest to oldest (this is different from the new implementation)
+        # therefore we need to reverse the data_dict_list
+        data_dict_list = data_dict_list[::-1]
+
         for origin_data in data_dict_list:  
             data_dict = origin_data['ego']
             voxel_features = data_dict['processed_lidar']['voxel_features']

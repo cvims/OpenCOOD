@@ -95,6 +95,21 @@ def caluclate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh):
     result_stat[iou_thresh]['gt'] += gt
 
 
+def calculate_kitti_criteria_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh, kitti_criteria_level, kitti_criteria_props):
+    bbox_height = kitti_criteria_props['bbox_height']
+    occlusion = kitti_criteria_props['occlusion']
+    truncation = kitti_criteria_props['truncation']
+
+    # https://github.com/traveller59/kitti-object-eval-python/blob/master/eval.py
+
+    # filter alle ground truths nach dem kitti criteria
+    # gts können einfach nach dem level gefiltert werden (bereits vorimplementiert)
+    # predictions müssen nach den criteria props gefiltert werden
+
+    # det_boxes müssen nach der min_height gefiltert werden
+    # alle kleineren boxes werden entfernt / ignoriert
+
+
 def calculate_ap(result_stat, iou, global_sort_detections):
     """
     Calculate the average precision and recall, and save them into a txt.
