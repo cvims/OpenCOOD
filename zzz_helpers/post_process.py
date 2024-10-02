@@ -180,6 +180,8 @@ def update_yaml_with_camera_metrics(org_path: str, additional_path: str):
             all_vehicles = additional_yaml_content['vehicles']
             # iterate cav folders
             for cav_id in cav_folders:
+                if folder == '2021_08_18_19_48_05' and timestamp == '000132':
+                    print('debug')
                 cav_path = os.path.join(org_path, folder, cav_id)
                 additional_cav_path = os.path.join(additional_path, folder, cav_id)
                 # load cav yaml
@@ -213,7 +215,7 @@ def update_yaml_with_camera_metrics(org_path: str, additional_path: str):
                         additional_cav_yaml_content['vehicles'][vehicle_id_int][rgb_name]['truncation'] = camera_visibility_vehicles_info[vehicle_id]['truncation']
 
                 # update the additional cav yaml with camera info
-                save_updated_yaml(additional_cav_yaml_content, additional_cav_yaml_file)
+                # save_updated_yaml(additional_cav_yaml_content, additional_cav_yaml_file)
 
 
 def save_updated_yaml(cav_yaml_content, new_yaml_file_path):
@@ -221,15 +223,15 @@ def save_updated_yaml(cav_yaml_content, new_yaml_file_path):
 
 
 if __name__ == "__main__":
-    original_path = r'/data/public_datasets/OPV2V/original/train'
-    additional_path = r'/data/public_datasets/OPV2V/original/train/additional'
+    # original_path = r'/data/public_datasets/OPV2V/original/train'
+    # additional_path = r'/data/public_datasets/OPV2V/original/train/additional'
 
-    update_yaml_with_camera_metrics(original_path, additional_path)
+    # update_yaml_with_camera_metrics(original_path, additional_path)
 
-    original_path = r'/data/public_datasets/OPV2V/original/validate'
-    additional_path = r'/data/public_datasets/OPV2V/original/validate/additional'
+    # original_path = r'/data/public_datasets/OPV2V/original/validate'
+    # additional_path = r'/data/public_datasets/OPV2V/original/validate/additional'
 
-    update_yaml_with_camera_metrics(original_path, additional_path)
+    # update_yaml_with_camera_metrics(original_path, additional_path)
 
     original_path = r'/data/public_datasets/OPV2V/original/test'
     additional_path = r'/data/public_datasets/OPV2V/original/test/additional'

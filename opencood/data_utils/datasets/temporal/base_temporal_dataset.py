@@ -51,12 +51,6 @@ class BaseTemporalDataset(BaseDataset):
         else:
             self.timestamp_offset_mean = 0
             self.timestamp_offset_std = 0
-        
-        self.sensor_cache_container = kwargs.get('sensor_cache_container', None)
-
-        # all previous timestamps are with ego data only (no cooperation)
-        # only the current timestamp (last data point) has cooperation
-        self.temporal_ego_only = params['fusion']['args']['temporal_ego_only'] if 'temporal_ego_only' in params['fusion']['args'] else False
 
         super(BaseTemporalDataset, self).__init__(params, visualize, train, validate, **kwargs)
 
@@ -70,120 +64,193 @@ class BaseTemporalDataset(BaseDataset):
         """
         raise NotImplementedError
 
-    def retrieve_base_data(self, idx, cur_ego_pose_flag=True, load_camera_data=False, load_lidar_data=False):
+    def retrieve_base_data_before(self, scenario_index, timestamp_index, cur_timestamp_key, cur_ego_pose_flag=True, load_camera_data=False, load_lidar_data=False, load_ego_only=True):
         """
-        Given the index, return the corresponding data.
-
-        Parameters
-        ----------
-        idx : int or tuple
-            Index given by dataloader or given scenario index and timestamp.
-
-        cur_ego_pose_flag : bool
-            Indicate whether to use current timestamp ego pose to calculate
-            transformation matrix.
-
-        Returns
-        -------
-        data : dict
-            The dictionary contains loaded yaml params and lidar data for
-            each cav.
+        Retrieves base data for timestamps prior to the current one.
         """
+        assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
+
+        scenario_database = self.scenario_database[scenario_index]
+        timestamp_key = self.return_timestamp_key(scenario_database, timestamp_index)
+        ego_cav_content = [cav_content for cav_content in scenario_database.values() if cav_content['ego']][0]
+
+        data = OrderedDict()
+        for cav_id, cav_content in scenario_database.items():
+            if load_ego_only and not cav_content['ego']:
+                continue
+
+            # Calculate delay and adjusted timestamp
+            timestamp_delay = self.time_delay_calculation(cav_content['ego'])
+            timestamp_index_delay = max(0, timestamp_index - timestamp_delay)
+            timestamp_key_delay = self.return_timestamp_key(scenario_database, timestamp_index_delay)
+
+            # check if CAV has data for the timestamp (otherwise it is possibly out of communication range)
+            if timestamp_key not in cav_content:
+                continue
+
+            # Retrieve and structure CAV data
+            data[cav_id] = self.retrieve_cav_data(
+                cav_content, ego_cav_content, cur_timestamp_key, timestamp_key_delay, cur_ego_pose_flag, load_lidar_data, load_camera_data
+            )
+
+            # Store timestamp-related data
+            data[cav_id]['timestamp_key'] = timestamp_key
+            data[cav_id]['time_delay'] = timestamp_delay
+            data[cav_id]['timestamp_key_delay'] = timestamp_key_delay
+        
+        return data
+
+    def retrieve_temporal_data(self, idx, cur_ego_pose_flag=True, load_camera_data=False, load_lidar_data=False):
         assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
         # if the queue length is set to 1, then the vehicle offset is already the connection to the previous car
         # otherwise it starts with the second vehicle (e.g. the first vehicle offset is the identity matrix)
 
         # we loop the accumulated length list to see get the scenario index
         if isinstance(idx, int):
-            scenario_database, timestamp_indices, prev_bev_exists, timestamp_offset = self.retrieve_by_idx(idx)
+            scenario_database, scenario_index, timestamp_indices, prev_bev_exists, timestamp_offset = self.retrieve_temporal_by_idx(idx)
         else:
             import sys
             sys.exit('Index has to be a int')
-        
-        ego_cav_content = [cav_content for _, cav_content in scenario_database.items() if cav_content['ego']][0]
 
+        last_frame_timestamp_key = self.return_timestamp_key(scenario_database, timestamp_indices[-1])
+        
         data_queue = []
         # Load files for all timestamps
-        for i, (timestamp_index, prev_bev_exist) in enumerate(zip(timestamp_indices, prev_bev_exists)):
-            # retrieve the corresponding timestamp key
-            timestamp_key = self.return_timestamp_key(
-                scenario_database, timestamp_index)
-
-            data = OrderedDict()
-            # load files for all CAVs
-            for cav_id, cav_content in scenario_database.items():
-                if timestamp_key not in cav_content:
-                    continue
-
-                if self.temporal_ego_only and i < self.queue_length - 1:
-                    if not cav_content['ego']:
-                        continue
-
-                data[cav_id] = OrderedDict()
-                data[cav_id]['ego'] = cav_content['ego']
-                data[cav_id]['vehicles'] = cav_content[timestamp_key]['yaml']['vehicles']
-                data[cav_id]['true_ego_pos'] = cav_content[timestamp_key]['yaml']['true_ego_pos']
-
-                # calculate delay for this vehicle
-                timestamp_delay = \
-                    self.time_delay_calculation(cav_content['ego'])
-
-                if timestamp_index - timestamp_delay <= 0:
-                    timestamp_delay = timestamp_index
-
-                timestamp_index_delay = max(0, timestamp_index - timestamp_delay)
-                timestamp_key_delay = self.return_timestamp_key(scenario_database,
-                                                                timestamp_index_delay)
-                # add time delay to vehicle parameters
-                data[cav_id]['time_delay'] = timestamp_delay
-                data[cav_id]['timestamp_key'] = timestamp_key_delay
-
-                # load the lidar params into the dictionary
-                data[cav_id]['params'] = self.reform_lidar_param(
-                    cav_content, ego_cav_content,
-                    timestamp_key, timestamp_key_delay, cur_ego_pose_flag)
-
-                if load_lidar_data:
-                    data[cav_id]['lidar_np'] = \
-                        pcd_to_np(cav_content[timestamp_key_delay]['lidar'], self.sensor_cache_container)
-
-                if load_camera_data:
-                    # load the camera transformation matrix to dictionary
-                    data[cav_id]['camera_params'] = \
-                        self.reform_camera_param(cav_content, ego_cav_content, timestamp_key)
-                    data[cav_id]['camera_np'] = \
-                        load_rgb_from_files(cav_content[timestamp_key_delay]['cameras'], self.sensor_cache_container)                    
-
-                # # add previous bev information
-                # if i == 0:
-                #     data[cav_id]['prev_bev_exists'] = False  # Could also be True (see prev_bev_exists), but we keep the first always False
-                #     data[cav_id]['prev_pose_offset'] = np.eye(4)
-                #     # if queue length is set to 1, use the previous frame (if possible) to calculate the transformation matrix
-                #     if self.queue_length == 1:
-                #         # offset between current and previous frame
-                #         # -1 because we want the previous frame and - timestamp offset (which is the skips in between the frames)
-                #         prev_timestamp_index = max(0, timestamp_index_delay - timestamp_offset - 1)
-                #         prev_timestamp_index_key = self.return_timestamp_key(scenario_database, prev_timestamp_index)
-
-                #         if prev_timestamp_index >= timestamp_index_delay:
-                #             data[cav_id]['prev_bev_exists'] = False
-                #             data[cav_id]['prev_pose_offset'] = np.eye(4)
-                #         else:
-                #             prev_cav_data = dict()
-                #             prev_cav_data['params'] = self.reform_lidar_param(
-                #                 cav_content, ego_cav_content,
-                #                 prev_timestamp_index_key, prev_timestamp_index_key, cur_ego_pose_flag
-                #             )
-                #             data[cav_id]['prev_bev_exists'] = True
-                #             data[cav_id]['prev_pose_offset'] = calculate_prev_pose_offset(data[cav_id], prev_cav_data)
-                # else:
-                #     data[cav_id]['prev_bev_exists'] = prev_bev_exist
-                #     data[cav_id]['prev_pose_offset'] = calculate_prev_pose_offset(
-                #         data[cav_id], data_queue[i - 1][cav_id])
+        for i, timestamp_index in enumerate(timestamp_indices):
+            if i < len(timestamp_indices) - 1:
+                data = self.retrieve_base_data_before(
+                    scenario_index, timestamp_index, last_frame_timestamp_key, cur_ego_pose_flag,
+                    load_camera_data, load_lidar_data,
+                    load_ego_only=self.temporal_ego_only)
+            else:
+                data, _ = self.retrieve_base_data(
+                    idx, cur_ego_pose_flag,
+                    load_camera_data, load_lidar_data,
+                    load_ego_only=False) # for the latest frame always all CAV
+            
+            # add temporal vehicle entry (the vehicles of the frame from the lidar data)
+            timestamp_key = self.return_timestamp_key(scenario_database, timestamp_index)
+            for v_id in data:
+                data[v_id]['params']['temporal_vehicles'] = self.scenario_database[scenario_index][v_id][timestamp_key]['yaml']['vehicles']
 
             data_queue.append(data)
-
+        
         return data_queue
+
+    # def retrieve_base_data(self, idx, cur_ego_pose_flag=True, load_camera_data=False, load_lidar_data=False):
+    #     """
+    #     Given the index, return the corresponding data.
+
+    #     Parameters
+    #     ----------
+    #     idx : int or tuple
+    #         Index given by dataloader or given scenario index and timestamp.
+
+    #     cur_ego_pose_flag : bool
+    #         Indicate whether to use current timestamp ego pose to calculate
+    #         transformation matrix.
+
+    #     Returns
+    #     -------
+    #     data : dict
+    #         The dictionary contains loaded yaml params and lidar data for
+    #         each cav.
+    #     """
+    #     assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
+    #     # if the queue length is set to 1, then the vehicle offset is already the connection to the previous car
+    #     # otherwise it starts with the second vehicle (e.g. the first vehicle offset is the identity matrix)
+
+    #     # we loop the accumulated length list to see get the scenario index
+    #     if isinstance(idx, int):
+    #         scenario_database, timestamp_indices, prev_bev_exists, timestamp_offset = self.retrieve_by_idx(idx)
+    #     else:
+    #         import sys
+    #         sys.exit('Index has to be a int')
+        
+    #     ego_cav_content = [cav_content for _, cav_content in scenario_database.items() if cav_content['ego']][0]
+
+    #     data_queue = []
+    #     # Load files for all timestamps
+    #     for i, (timestamp_index, prev_bev_exist) in enumerate(zip(timestamp_indices, prev_bev_exists)):
+    #         # retrieve the corresponding timestamp key
+    #         timestamp_key = self.return_timestamp_key(
+    #             scenario_database, timestamp_index)
+
+    #         data = OrderedDict()
+    #         # load files for all CAVs
+    #         for cav_id, cav_content in scenario_database.items():
+    #             if timestamp_key not in cav_content:
+    #                 continue
+
+    #             if self.temporal_ego_only and i < self.queue_length - 1:
+    #                 if not cav_content['ego']:
+    #                     continue
+
+    #             data[cav_id] = OrderedDict()
+    #             data[cav_id]['ego'] = cav_content['ego']
+    #             data[cav_id]['vehicles'] = cav_content[timestamp_key]['yaml']['vehicles']
+    #             data[cav_id]['true_ego_pos'] = cav_content[timestamp_key]['yaml']['true_ego_pos']
+
+    #             # calculate delay for this vehicle
+    #             timestamp_delay = \
+    #                 self.time_delay_calculation(cav_content['ego'])
+
+    #             if timestamp_index - timestamp_delay <= 0:
+    #                 timestamp_delay = timestamp_index
+
+    #             timestamp_index_delay = max(0, timestamp_index - timestamp_delay)
+    #             timestamp_key_delay = self.return_timestamp_key(scenario_database,
+    #                                                             timestamp_index_delay)
+    #             # add time delay to vehicle parameters
+    #             data[cav_id]['time_delay'] = timestamp_delay
+    #             data[cav_id]['timestamp_key'] = timestamp_key_delay
+
+    #             # load the lidar params into the dictionary
+    #             data[cav_id]['params'] = self.reform_lidar_param(
+    #                 cav_content, ego_cav_content,
+    #                 timestamp_key, timestamp_key_delay, cur_ego_pose_flag)
+
+    #             if load_lidar_data:
+    #                 data[cav_id]['lidar_np'] = \
+    #                     pcd_to_np(cav_content[timestamp_key_delay]['lidar'], self.sensor_cache_container)
+
+    #             if load_camera_data:
+    #                 # load the camera transformation matrix to dictionary
+    #                 data[cav_id]['camera_params'] = \
+    #                     self.reform_camera_param(cav_content, ego_cav_content, timestamp_key)
+    #                 data[cav_id]['camera_np'] = \
+    #                     load_rgb_from_files(cav_content[timestamp_key_delay]['cameras'], self.sensor_cache_container)                    
+
+    #             # # add previous bev information
+    #             # if i == 0:
+    #             #     data[cav_id]['prev_bev_exists'] = False  # Could also be True (see prev_bev_exists), but we keep the first always False
+    #             #     data[cav_id]['prev_pose_offset'] = np.eye(4)
+    #             #     # if queue length is set to 1, use the previous frame (if possible) to calculate the transformation matrix
+    #             #     if self.queue_length == 1:
+    #             #         # offset between current and previous frame
+    #             #         # -1 because we want the previous frame and - timestamp offset (which is the skips in between the frames)
+    #             #         prev_timestamp_index = max(0, timestamp_index_delay - timestamp_offset - 1)
+    #             #         prev_timestamp_index_key = self.return_timestamp_key(scenario_database, prev_timestamp_index)
+
+    #             #         if prev_timestamp_index >= timestamp_index_delay:
+    #             #             data[cav_id]['prev_bev_exists'] = False
+    #             #             data[cav_id]['prev_pose_offset'] = np.eye(4)
+    #             #         else:
+    #             #             prev_cav_data = dict()
+    #             #             prev_cav_data['params'] = self.reform_lidar_param(
+    #             #                 cav_content, ego_cav_content,
+    #             #                 prev_timestamp_index_key, prev_timestamp_index_key, cur_ego_pose_flag
+    #             #             )
+    #             #             data[cav_id]['prev_bev_exists'] = True
+    #             #             data[cav_id]['prev_pose_offset'] = calculate_prev_pose_offset(data[cav_id], prev_cav_data)
+    #             # else:
+    #             #     data[cav_id]['prev_bev_exists'] = prev_bev_exist
+    #             #     data[cav_id]['prev_pose_offset'] = calculate_prev_pose_offset(
+    #             #         data[cav_id], data_queue[i - 1][cav_id])
+
+    #         data_queue.append(data)
+
+    #     return data_queue
 
     @staticmethod
     def find_ego_pose(base_data_dict):
@@ -216,7 +283,7 @@ class BaseTemporalDataset(BaseDataset):
         return ego_id, ego_lidar_pose
 
 
-    def retrieve_by_idx(self, idx):
+    def retrieve_temporal_by_idx(self, idx):
         """
         Retrieve the scenario index and timstamp by a single idx
         .
@@ -260,9 +327,7 @@ class BaseTemporalDataset(BaseDataset):
 
         scenario_database = self.scenario_database[scenario_index]
 
-        timestamp_indices = np.array(
-            [timestamp_index + i * (timestamp_offset + 1) for i in range(self.queue_length)]
-        )
+        timestamp_indices = [timestamp_index + i * (timestamp_offset + 1) for i in range(self.queue_length)]
         
         prev_bevs_exists = []
         if timestamp_index == 0:
@@ -273,7 +338,7 @@ class BaseTemporalDataset(BaseDataset):
         for i in range(self.queue_length - 1):
             prev_bevs_exists.append(True)
 
-        return scenario_database, timestamp_indices, prev_bevs_exists, timestamp_offset
+        return scenario_database, scenario_index, timestamp_indices, prev_bevs_exists, timestamp_offset
 
     def augment(self, **kwargs):
         """

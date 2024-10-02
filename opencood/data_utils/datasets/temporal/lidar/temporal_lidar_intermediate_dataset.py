@@ -75,7 +75,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                     prev_ego_id = ego_id
                     ego_lidar_pose = ego_content['params']['lidar_pose']
                     ego_loc = ego_content['params']['true_ego_pos']
-                    ego_vehicles = ego_content['vehicles']
+                    ego_vehicles = ego_content['params']['vehicles']
                     break
             assert cav_id == list(data_sample.keys())[
                 0], "The first element in the OrderedDict must be ego"
@@ -120,12 +120,15 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                         # ego_range_vehicles[v_id]['lidar_hits'] += selected_cav_base['vehicles'][v_id]['lidar_hits']
                         # Update KITTI criteria for cooperative perception
                         # CAVs can have easier visibility criteria than ego
-                        updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['vehicles'][v_id])
+                        try:
+                            updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['params']['vehicles'][v_id])
+                        except KeyError:
+                            print('debug')
                         ego_range_vehicles[v_id]['kitti_criteria'] = updated_kitti_criteria['kitti_criteria']
                         ego_range_vehicles[v_id]['kitti_criteria_props'] = updated_kitti_criteria['kitti_criteria_props']
                         # opv2v visible
-                        if not ego_range_vehicles[v_id]['opv2v_visible'] and selected_cav_base['vehicles'][v_id]['opv2v_visible']:
-                            ego_range_vehicles[v_id]['opv2v_visible'] = selected_cav_base['vehicles'][v_id]['opv2v_visible']
+                        if not ego_range_vehicles[v_id]['opv2v_visible'] and selected_cav_base['params']['vehicles'][v_id]['opv2v_visible']:
+                            ego_range_vehicles[v_id]['opv2v_visible'] = selected_cav_base['params']['vehicles'][v_id]['opv2v_visible']
 
                 object_stack.append(selected_cav_processed['object_bbx_center'])
                 object_id_stack += selected_cav_processed['object_ids']

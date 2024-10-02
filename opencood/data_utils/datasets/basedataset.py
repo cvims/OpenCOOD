@@ -9,6 +9,8 @@ import random
 from opencood.data_utils.augmentor.data_augmentor import DataAugmentor
 from opencood.utils.transformation_utils import x1_to_x2
 from opencood.hypes_yaml.yaml_utils import load_yaml
+from opencood.utils.pcd_utils import pcd_to_np
+from opencood.utils.camera_utils import load_rgb_from_files
 from opencood.data_utils.datasets import COM_RANGE
 from opencood.utils import common_utils
 from opencood.utils.temporal_utils import categorize_by_kitti_criteria, KITTI_DETECTION_CATEGORY_ENUM
@@ -88,6 +90,12 @@ class BaseDataset(Dataset):
         self.kitti_detection_criteria = detection_criteria['criteria']
         self.kitti_detection_criteria_threshold = KITTI_DETECTION_CATEGORY_ENUM[detection_criteria['criteria_threshold']]
 
+        self.sensor_cache_container = kwargs.get('sensor_cache_container', None)
+
+        # all previous timestamps are with ego data only (no cooperation)
+        # only the current timestamp (last data point) has cooperation
+        self.temporal_ego_only = params['fusion']['args']['temporal_ego_only'] if 'temporal_ego_only' in params['fusion']['args'] else False
+
         self.reinitialize()
 
     def reinitialize(self):
@@ -154,6 +162,23 @@ class BaseDataset(Dataset):
                 else:
                     self.scenario_database[i][cav_id]['ego'] = False
 
+            # check if ['yaml']['vehicles'].keys() of all entries are equal
+            first_key = list(self.scenario_database[i].keys())[0]
+            timestamps = list(self.scenario_database[i][first_key].keys())
+
+            # TODO DEBUG
+            print('TODO DEBUG')
+            for i in self.scenario_database:
+                for timestamp in timestamps:
+                    if timestamp == 'ego':
+                        continue
+
+                    vehicle_keys = []
+                    for cav_id in self.scenario_database[i]:
+                        vehicle_keys.append(list(self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles'].keys())[1:])
+
+                    if not all([vehicle_keys[0] == vehicle_keys[j] for j in range(1, len(vehicle_keys))]):
+                        print(i, timestamp, vehicle_keys[0], vehicle_keys[1])
 
     @staticmethod
     def load_camera_files(cav_path, timestamp):
@@ -218,7 +243,7 @@ class BaseDataset(Dataset):
         timestamp_index = idx if scenario_index == 0 else \
             idx - self.len_record[scenario_index - 1]
 
-        return scenario_database, timestamp_index
+        return scenario_database, scenario_index, timestamp_index
 
     @staticmethod
     def return_timestamp_key(scenario_database, timestamp_index):
@@ -345,7 +370,7 @@ class BaseDataset(Dataset):
         return noise_pose
 
 
-    def reform_lidar_param(self, cav_content, ego_content, timestamp_cur,
+    def reform_param(self, cav_content, ego_content, timestamp_cur,
                            timestamp_delay, cur_ego_pose_flag):
         """
         Reform the data params with current timestamp object groundtruth and
@@ -419,57 +444,74 @@ class BaseDataset(Dataset):
         return delay_params
 
 
-    def retrieve_base_data(self, idx, cur_ego_pose_flag=True):
-        # we loop the accumulated length list to see get the scenario index
+    def retrieve_base_data(self, idx, cur_ego_pose_flag=True, load_camera_data=False, load_lidar_data=False, load_ego_only=False):
+        """
+        Retrieves the base data for a given timestamp index or (scenario, timestamp) tuple.
+        """
+        assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
+
+        # Determine scenario and timestamp index
         if isinstance(idx, int):
-            scenario_database, timestamp_index = self.retrieve_by_idx(idx)
+            scenario_database, scenario_index, timestamp_index = self.retrieve_by_idx(idx)
         elif isinstance(idx, tuple):
             scenario_database = self.scenario_database[idx[0]]
             timestamp_index = idx[1]
         else:
-            import sys
-            sys.exit('Index has to be a int or tuple')
-        
-        # retrieve the corresponding timestamp key
-        timestamp_key = self.return_timestamp_key(scenario_database,
-                                                  timestamp_index)
-        # calculate distance to ego for each cav for time delay estimation
+            raise ValueError('Index must be an int or tuple')
+
+        # Retrieve the corresponding timestamp key
+        timestamp_key = self.return_timestamp_key(scenario_database, timestamp_index)
+
+        # Find the ego vehicle
         ego_cav_content = [cav_content for cav_content in scenario_database.values() if cav_content['ego']][0]
-    
+
         data = OrderedDict()
-        # load files for all CAVs
         for cav_id, cav_content in scenario_database.items():
-            data[cav_id] = OrderedDict()
-            data[cav_id]['ego'] = cav_content['ego']
+            if load_ego_only and not cav_content['ego']:
+                continue
 
-            # calculate delay for this vehicle
-            timestamp_delay = \
-                self.time_delay_calculation(cav_content['ego'])
-            
-            if timestamp_index - timestamp_delay <= 0:
-                timestamp_delay = timestamp_index
-
+            # Calculate delay and adjusted timestamp
+            timestamp_delay = self.time_delay_calculation(cav_content['ego'])
             timestamp_index_delay = max(0, timestamp_index - timestamp_delay)
-            timestamp_key_delay = self.return_timestamp_key(scenario_database,
-                                                            timestamp_index_delay)
-            
-            # add time delay to vehicle parameters
-            data[cav_id]['time_delay'] = timestamp_delay
+            timestamp_key_delay = self.return_timestamp_key(scenario_database, timestamp_index_delay)
 
-            # load the camera transformation matrix to dictionary
-            data[cav_id]['camera_params'] = \
-                self.reform_camera_param(cav_content,
-                                         ego_cav_content,
-                                         timestamp_key)
-            # load the lidar params into the dictionary
-            data[cav_id]['params'] = self.reform_lidar_param(cav_content,
-                                                             ego_cav_content,
-                                                             timestamp_key,
-                                                             timestamp_key_delay,
-                                                             cur_ego_pose_flag)
+            # check if CAV has data for the timestamp (otherwise it is possibly out of communication range)
+            if timestamp_key not in cav_content:
+                continue
+
+            # Retrieve and structure CAV data
+            data[cav_id] = self.retrieve_cav_data(
+                cav_content, ego_cav_content, timestamp_key, timestamp_key_delay, cur_ego_pose_flag, load_lidar_data, load_camera_data
+            )
+
+            # Store timestamp-related data
+            data[cav_id]['timestamp_key'] = timestamp_key
+            data[cav_id]['time_delay'] = timestamp_delay
+            data[cav_id]['timestamp_key_delay'] = timestamp_key_delay
         
-        return data
-    
+        # check if ['params']['vehicles'].keys() of all entries are equal
+        vehicle_ids = [list(data[cav_id]['params']['vehicles'].keys())[1:] for cav_id in data]
+        if not all([vehicle_ids[0] == vehicle_ids[i] for i in range(1, len(vehicle_ids))]):
+            print('debug')
+        return data, scenario_index
+
+    def retrieve_cav_data(self, cav_content, ego_cav_content, timestamp_key, timestamp_key_delay, cur_ego_pose_flag, load_lidar_data, load_camera_data):
+        """
+        Helper function to retrieve and structure CAV data for a given timestamp.
+        """
+        cav_data = OrderedDict()
+        cav_data['ego'] = cav_content['ego']
+        cav_data['params'] = self.reform_param(cav_content, ego_cav_content, timestamp_key, timestamp_key_delay, cur_ego_pose_flag)
+        
+        if load_lidar_data:
+            cav_data['lidar_np'] = pcd_to_np(cav_content[timestamp_key_delay]['lidar'], self.sensor_cache_container)
+
+        if load_camera_data:
+            cav_data['camera_params'] = self.reform_camera_param(cav_content, ego_cav_content, timestamp_key)
+            cav_data['camera_np'] = load_rgb_from_files(cav_content[timestamp_key_delay]['cameras'], self.sensor_cache_container)
+        
+        return cav_data
+
     def get_pairwise_transformation(self, base_data_dict, max_cav, proj_first=False):
         """
         Get pair-wise transformation matrix accross different agents.

@@ -25,7 +25,4 @@ class BaseTemporalLidarDataset(BaseTemporalDataset):
             params['fusion']['args']['cur_ego_pose_flag']
     
     def get_sample_random(self, idx):
-        return self.retrieve_base_data(idx, self.cur_ego_pose_flag, load_camera_data=False, load_lidar_data=True)
-
-
-    
+        return self.retrieve_temporal_data(idx, self.cur_ego_pose_flag, load_camera_data=False, load_lidar_data=True)
