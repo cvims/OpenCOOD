@@ -69,7 +69,7 @@ def inference_early_fusion(batch_data, model, dataset):
     output_dict['ego'] = model(cav_content)
 
     pred_box_tensor, pred_score, gt_box_tensor, object_detection_info = \
-        dataset.post_process(batch_data[0],
+        dataset.post_process(batch_data[-1],
                             output_dict)
 
     return pred_box_tensor, pred_score, gt_box_tensor, object_detection_info

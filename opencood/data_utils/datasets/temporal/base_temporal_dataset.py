@@ -97,6 +97,7 @@ class BaseTemporalDataset(BaseDataset):
             data[cav_id]['timestamp_key'] = timestamp_key
             data[cav_id]['time_delay'] = timestamp_delay
             data[cav_id]['timestamp_key_delay'] = timestamp_key_delay
+            data[cav_id]['scenario_folder'] = cav_content[timestamp_key]['scenario_folder']
         
         return data
 
@@ -123,13 +124,16 @@ class BaseTemporalDataset(BaseDataset):
                     load_camera_data, load_lidar_data,
                     load_ego_only=self.temporal_ego_only)
             else:
+                scenario_idx_length = 0 if scenario_index == 0 else self.len_record[scenario_index - 1]
+                true_idx = timestamp_index + scenario_idx_length
                 data, _ = self.retrieve_base_data(
-                    idx, cur_ego_pose_flag,
+                    true_idx, cur_ego_pose_flag,
                     load_camera_data, load_lidar_data,
                     load_ego_only=False) # for the latest frame always all CAV
             
             # add temporal vehicle entry (the vehicles of the frame from the lidar data)
             timestamp_key = self.return_timestamp_key(scenario_database, timestamp_index)
+
             for v_id in data:
                 data[v_id]['params']['temporal_vehicles'] = self.scenario_database[scenario_index][v_id][timestamp_key]['yaml']['vehicles']
 

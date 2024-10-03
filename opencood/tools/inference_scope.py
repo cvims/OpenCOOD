@@ -44,6 +44,14 @@ def test_parser():
                         help='whether to globally sort detections by confidence score.'
                              'If set to True, it is the mainstream AP computing method,'
                              'but would increase the tolerance for FP (False Positives).')
+    parser.add_argument('--comm_thre', type=float, default=0,
+                        help='Communication confidence threshold')
+    parser.add_argument('--score_thre', type=float, default=0.23,
+                    help='Confidence score threshold')
+    parser.add_argument('--xyz_std', type=float, default=0.2,
+                    help='position error')
+    parser.add_argument('--ryp_std', type=float, default=0.2,
+                help='rotation error')
     opt = parser.parse_args()
     return opt
 
@@ -63,13 +71,22 @@ def main():
                                                     'image mode or video mode'
 
     hypes = yaml_utils.load_yaml(None, opt)
+    if opt.comm_thre is not None:
+        hypes['model']['args']['fusion_args']['communication']['thre'] = opt.comm_thre
+    if opt.score_thre is not None:
+        hypes['postprocess']['target_args']['score_threshold'] = opt.score_thre
+    score_threshold = hypes['postprocess']['target_args']['score_threshold']
+    if opt.xyz_std is not None:
+        hypes['wild_setting']['xyz_std'] = opt.xyz_std
+    if opt.ryp_std is not None:
+        hypes['wild_setting']['ryp_std'] = opt.ryp_std
 
     print('Dataset Building')
     opencood_dataset = build_dataset(hypes, visualize=True, train=False)
     print(f"{len(opencood_dataset)} samples found.")
     data_loader = DataLoader(opencood_dataset,
                              batch_size=1,
-                             num_workers=1,
+                             num_workers=8,
                              collate_fn=opencood_dataset.collate_batch_test,
                              shuffle=False,
                              pin_memory=False,
@@ -163,7 +180,7 @@ def main():
                     
                     # filtered_gt_box_tensor = gt_box_tensor[selected_ids]
                     filtered_gt_box_tensor = gt_box_tensor
-                
+
                 eval_utils.caluclate_tp_fp(
                     pred_box_tensor,
                     pred_score,

@@ -55,40 +55,43 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         all_in_range_vehicles = []
         all_visible_vehicles = []
 
+        ego_id = -999
+        ego_lidar_pose = []
+        ego_loc = []
+        ego_vehicles = None
+
+        # first find the ego vehicle's lidar pose (scenario_samples[-1] because it is the last frame)
+        for i, data_sample in enumerate(scenario_samples):
+            for cav_id, ego_content in data_sample.items():
+                if i == len(scenario_samples)-1:
+                    if ego_content['ego']:
+                        ego_id = cav_id
+                        if prev_ego_id == -999:
+                            prev_ego_id = ego_id
+                        if ego_id != prev_ego_id:
+                            print('Attention: Ego vehicle changed in the same scenario.')
+                        prev_ego_id = ego_id
+                        ego_lidar_pose = ego_content['params']['lidar_pose']
+                        ego_loc = ego_content['params']['true_ego_pos']
+                        ego_vehicles = ego_content['params']['vehicles']
+                        break
+            assert cav_id == list(data_sample.keys())[
+                0], "The first element in the OrderedDict must be ego"
+
+        assert ego_id != -999
+        assert len(ego_lidar_pose) > 0
+
+        # process all vehicles in ego perspective so that the temporal approach can simply restore them without recalculating
+        processed_data = self.get_item_single_car(ego_content, ego_lidar_pose) #, range_filter=self.full_object_range)
+        all_processed_data.append(processed_data)
+        ego_range_vehicles = {v_id: ego_vehicles[v_id] for v_id in processed_data['object_ids']}
+
         for s_idx, data_sample in enumerate(scenario_samples):
             processed_data_dict = OrderedDict()
             processed_data_dict['ego'] = OrderedDict()
 
-            ego_id = -999
-            ego_lidar_pose = []
-            ego_loc = []
-            ego_vehicles = None
-
-            # first find the ego vehicle's lidar pose
-            for cav_id, ego_content in data_sample.items():
-                if ego_content['ego']:
-                    ego_id = cav_id
-                    if prev_ego_id == -999:
-                        prev_ego_id = ego_id
-                    if ego_id != prev_ego_id:
-                        print('Attention: Ego vehicle changed in the same scenario.')
-                    prev_ego_id = ego_id
-                    ego_lidar_pose = ego_content['params']['lidar_pose']
-                    ego_loc = ego_content['params']['true_ego_pos']
-                    ego_vehicles = ego_content['params']['vehicles']
-                    break
-            assert cav_id == list(data_sample.keys())[
-                0], "The first element in the OrderedDict must be ego"
-            assert ego_id != -999
-            assert len(ego_lidar_pose) > 0
-
             pairwise_t_matrix = \
                 self.get_pairwise_transformation(data_sample, self.params['train_params']['max_cav'], proj_first=False)
-
-            # process all vehicles in ego perspective so that the temporal approach can simply restore them without recalculating
-            processed_data = self.get_item_single_car(ego_content, ego_lidar_pose) #, range_filter=self.full_object_range)
-            all_processed_data.append(processed_data)
-            ego_range_vehicles = {v_id: ego_vehicles[v_id] for v_id in processed_data['object_ids']}
 
             processed_features = []
             object_stack = []
@@ -120,10 +123,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                         # ego_range_vehicles[v_id]['lidar_hits'] += selected_cav_base['vehicles'][v_id]['lidar_hits']
                         # Update KITTI criteria for cooperative perception
                         # CAVs can have easier visibility criteria than ego
-                        try:
-                            updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['params']['vehicles'][v_id])
-                        except KeyError:
-                            print('debug')
+                        updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['params']['vehicles'][v_id])
                         ego_range_vehicles[v_id]['kitti_criteria'] = updated_kitti_criteria['kitti_criteria']
                         ego_range_vehicles[v_id]['kitti_criteria_props'] = updated_kitti_criteria['kitti_criteria_props']
                         # opv2v visible
@@ -318,7 +318,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
         # filter lidar
         lidar_np = selected_cav_base['lidar_np']
-        lidar_np = shuffle_points(lidar_np)
+        # lidar_np = shuffle_points(lidar_np)
         # remove points that hit itself
         lidar_np = mask_ego_points(lidar_np)
         # project the lidar to ego space

@@ -1,6 +1,7 @@
 import os
 from collections import OrderedDict
 
+import copy
 import numpy as np
 from torch.utils.data import Dataset
 import pickle
@@ -145,6 +146,7 @@ class BaseDataset(Dataset):
                     self.scenario_database[i][cav_id][timestamp]['yaml'] = self.all_yamls[scenario_folder][cav_id][timestamp]
                     self.scenario_database[i][cav_id][timestamp]['lidar'] = os.path.join(cav_path, f'{timestamp}.pcd')
                     self.scenario_database[i][cav_id][timestamp]['cameras'] = self.load_camera_files(cav_path, timestamp)
+                    self.scenario_database[i][cav_id][timestamp]['scenario_folder'] = scenario_folder
 
                     # update the vehicles with the visibility categoryv
                     vehicles = self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles']
@@ -161,24 +163,6 @@ class BaseDataset(Dataset):
                         self.len_record.append(prev_last + len(timestamps))
                 else:
                     self.scenario_database[i][cav_id]['ego'] = False
-
-            # check if ['yaml']['vehicles'].keys() of all entries are equal
-            first_key = list(self.scenario_database[i].keys())[0]
-            timestamps = list(self.scenario_database[i][first_key].keys())
-
-            # TODO DEBUG
-            print('TODO DEBUG')
-            for i in self.scenario_database:
-                for timestamp in timestamps:
-                    if timestamp == 'ego':
-                        continue
-
-                    vehicle_keys = []
-                    for cav_id in self.scenario_database[i]:
-                        vehicle_keys.append(list(self.scenario_database[i][cav_id][timestamp]['yaml']['vehicles'].keys())[1:])
-
-                    if not all([vehicle_keys[0] == vehicle_keys[j] for j in range(1, len(vehicle_keys))]):
-                        print(i, timestamp, vehicle_keys[0], vehicle_keys[1])
 
     @staticmethod
     def load_camera_files(cav_path, timestamp):
@@ -397,11 +381,11 @@ class BaseDataset(Dataset):
         ------
         The merged parameters.
         """
-        cur_params = cav_content[timestamp_cur]['yaml']
-        delay_params = cav_content[timestamp_delay]['yaml']
+        cur_params = copy.deepcopy(cav_content[timestamp_cur]['yaml'])
+        delay_params = copy.deepcopy(cav_content[timestamp_delay]['yaml'])
 
-        cur_ego_params = ego_content[timestamp_cur]['yaml']
-        delay_ego_params = ego_content[timestamp_delay]['yaml']
+        cur_ego_params = copy.deepcopy(ego_content[timestamp_cur]['yaml'])
+        delay_ego_params = copy.deepcopy(ego_content[timestamp_delay]['yaml'])
 
         # we need to calculate the transformation matrix from cav to ego
         # at the delayed timestamp
@@ -488,9 +472,10 @@ class BaseDataset(Dataset):
             data[cav_id]['timestamp_key'] = timestamp_key
             data[cav_id]['time_delay'] = timestamp_delay
             data[cav_id]['timestamp_key_delay'] = timestamp_key_delay
+            data[cav_id]['scenario_folder'] = cav_content[timestamp_key]['scenario_folder']
         
         # check if ['params']['vehicles'].keys() of all entries are equal
-        vehicle_ids = [list(data[cav_id]['params']['vehicles'].keys())[1:] for cav_id in data]
+        vehicle_ids = [list(data[cav_id]['params']['vehicles'].keys())[len(scenario_database.keys())-1:] for cav_id in data]
         if not all([vehicle_ids[0] == vehicle_ids[i] for i in range(1, len(vehicle_ids))]):
             print('debug')
         return data, scenario_index
@@ -531,28 +516,29 @@ class BaseDataset(Dataset):
             shape: (L, L, 4, 4)
         """
         pairwise_t_matrix = np.zeros((max_cav, max_cav, 4, 4))
+        pairwise_t_matrix[:, :] = np.identity(4)
 
-        if proj_first:
-            # if lidar projected to ego first, then the pairwise matrix
-            # becomes identity
-            pairwise_t_matrix[:, :] = np.identity(4)
-        else:
-            t_list = []
+        # if proj_first:
+        #     # if lidar projected to ego first, then the pairwise matrix
+        #     # becomes identity
+        #     pairwise_t_matrix[:, :] = np.identity(4)
+        # else:
+        #     t_list = []
 
-            # save all transformation matrix in a list in order first.
-            for cav_id, cav_content in base_data_dict.items():
-                t_list.append(cav_content['params']['transformation_matrix'])
+        #     # save all transformation matrix in a list in order first.
+        #     for cav_id, cav_content in base_data_dict.items():
+        #         t_list.append(cav_content['params']['transformation_matrix'])
 
-            for i in range(len(t_list)):
-                for j in range(len(t_list)):
-                    # identity matrix to self
-                    if i == j:
-                        t_matrix = np.eye(4)
-                        pairwise_t_matrix[i, j] = t_matrix
-                        continue
-                    # i->j: TiPi=TjPj, Tj^(-1)TiPi = Pj
-                    t_matrix = np.dot(np.linalg.inv(t_list[j]), t_list[i])
-                    pairwise_t_matrix[i, j] = t_matrix
+        #     for i in range(len(t_list)):
+        #         for j in range(len(t_list)):
+        #             # identity matrix to self
+        #             if i == j:
+        #                 t_matrix = np.eye(4)
+        #                 pairwise_t_matrix[i, j] = t_matrix
+        #                 continue
+        #             # i->j: TiPi=TjPj, Tj^(-1)TiPi = Pj
+        #             t_matrix = np.dot(np.linalg.inv(t_list[j]), t_list[i])
+        #             pairwise_t_matrix[i, j] = t_matrix
 
         return pairwise_t_matrix
 
