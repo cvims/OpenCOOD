@@ -4,11 +4,11 @@
 
 
 import os
-
+import cv2
 import numpy as np
 import torch
 
-from opencood.utils import common_utils
+from opencood.utils import common_utils, box_utils, camera_utils
 from opencood.hypes_yaml import yaml_utils
 
 
@@ -95,19 +95,49 @@ def caluclate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh):
     result_stat[iou_thresh]['gt'] += gt
 
 
-def calculate_kitti_criteria_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh, kitti_criteria_level, kitti_criteria_props):
-    bbox_height = kitti_criteria_props['bbox_height']
-    occlusion = kitti_criteria_props['occlusion']
-    truncation = kitti_criteria_props['truncation']
-
+def caluclate_tp_fp_kitti(det_boxes, det_score, gt_boxes, result_stat, iou_thresh, gt_object_ids_criteria, criteria_props, camera_lidar_transform):
+    bbox_height = criteria_props['bbox_height']
+    occlusion = criteria_props['occlusion']
+    truncation = criteria_props['truncation']
     # https://github.com/traveller59/kitti-object-eval-python/blob/master/eval.py
+    """
+        4 -------- 5
+       /|         /|
+      7 -------- 6 .
+      | |        | |
+      . 0 -------- 1
+      |/         |/
+      3 -------- 2
+        corners3d: np.ndarray or torch.Tensor
+        (N, 8, 3), the 8 corners of the bounding box.
+    """
+    # ^ z
+    # |
+    # |
+    # | . x
+    # |/
+    # +-------> y
 
-    # filter alle ground truths nach dem kitti criteria
-    # gts können einfach nach dem level gefiltert werden (bereits vorimplementiert)
-    # predictions müssen nach den criteria props gefiltert werden
+    det_boxes = det_boxes.cpu().numpy()
+    gt_boxes = gt_boxes.cpu().numpy()
+    # transform det_boxes to camera coordinate
+    for camera_transform in camera_lidar_transform:
+        for camera in camera_transform:
+            camera_extrinsic_to_ego_lidar = camera_transform[camera]['camera_extrinsic'].cpu().numpy()
+            camera_intrinsics = camera_transform[camera]['camera_intrinsic'].cpu().numpy()
 
-    # det_boxes müssen nach der min_height gefiltert werden
-    # alle kleineren boxes werden entfernt / ignoriert
+            cam_boxes = camera_utils.project_3d_to_camera(det_boxes, camera_intrinsics, camera_extrinsic_to_ego_lidar)
+            # to 2d boxes
+            # cam_boxes = box_utils.box3d_to_2d(cam_boxes)
+            # load image
+            image = camera_transform[camera]['image_path']
+            image = cv2.imread(image)
+            image, filtered_cam_boxes, filter_mask = camera_utils.draw_2d_bbx(image, cam_boxes)
+            # save image
+            cv2.imwrite('test.jpg', image)
+
+            bbox_heights = filtered_cam_boxes[:, 0, 1] - filtered_cam_boxes[:, 4, 1]
+            break
 
 
 def calculate_ap(result_stat, iou, global_sort_detections):

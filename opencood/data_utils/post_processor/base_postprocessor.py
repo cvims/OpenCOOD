@@ -84,10 +84,6 @@ class BasePostprocessor(object):
             for _object_id_list in object_ids:
                 object_id_list += _object_id_list
 
-            # # append the visibility information
-            # for det_info in cav_content['object_detection_info']:
-            #     object_detection_info_mapping.append(cav_content['object_detection_info'])
-
         # gt bbx 3d
         gt_box3d_list = torch.vstack(gt_box3d_list)
         # some of the bbx may be repetitive, use the id list to filter
@@ -100,20 +96,10 @@ class BasePostprocessor(object):
             box_utils.get_mask_for_boxes_within_range_torch(gt_box3d_tensor)
         gt_box3d_tensor = gt_box3d_tensor[mask, :, :]
 
-        # # filter the visibility information - use indices from object_id_list
-        # selected_frame_object_visibility_mapping = {}
-        # selected_temporal_object_visibility_mapping = {}
-        # selected_object_id_list = set()
-        # for l, m in zip(object_id_list, mask):
-        #     if m:
-        #         selected_object_id_list.add(l)
-        # for key in set(selected_object_id_list):
-        #     selected_frame_object_visibility_mapping[key] = frame_object_visibility_mapping[key]
-        #     selected_temporal_object_visibility_mapping[key] = temporal_object_visibility_mapping[key]
+        # filter object_id_list with mask
+        object_id_list = [object_id_list[i] for i in range(len(mask)) if mask[i]]
 
-        #     return gt_box3d_tensor, selected_frame_object_visibility_mapping, selected_temporal_object_visibility_mapping
-
-        return gt_box3d_tensor, object_detection_info_mapping
+        return gt_box3d_tensor, object_id_list
 
     def generate_object_center(self,
                                cav_contents,

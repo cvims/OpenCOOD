@@ -86,7 +86,7 @@ def main():
     print(f"{len(opencood_dataset)} samples found.")
     data_loader = DataLoader(opencood_dataset,
                              batch_size=1,
-                             num_workers=8,
+                             num_workers=1,
                              collate_fn=opencood_dataset.collate_batch_test,
                              shuffle=False,
                              pin_memory=False,
@@ -106,8 +106,10 @@ def main():
 
     # Create the dictionary for evaluation.
     # also store the confidence score for each prediction
-    result_stats_levels = ['all'] #, 'easy']  #, 'moderate', 'hard', 'very_hard']
+    result_stats_levels = ['all', 'easy']  #, 'moderate', 'hard', 'very_hard']
     result_stats = {level: create_result_stat_dict() for level in result_stats_levels}
+
+    kitti_criteria_props = hypes['kitti_detection']['criteria']
 
     result_stats_opv2v_original = create_result_stat_dict()
 
@@ -133,17 +135,17 @@ def main():
             torch.cuda.synchronize()
             batch_data = train_utils.to_device(batch_data, device)
             if opt.fusion_method == 'late':
-                pred_box_tensor, pred_score, gt_box_tensor, object_detection_info = \
+                pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids = \
                     inference_utils.inference_late_fusion(batch_data,
                                                           model,
                                                           opencood_dataset)
             elif opt.fusion_method == 'early':
-                pred_box_tensor, pred_score, gt_box_tensor, object_detection_info = \
+                pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids = \
                     inference_utils.inference_early_fusion(batch_data,
                                                            model,
                                                            opencood_dataset)
             elif opt.fusion_method == 'intermediate':
-                pred_box_tensor, pred_score, gt_box_tensor, object_detection_info = \
+                pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids = \
                     inference_utils.inference_intermediate_fusion(batch_data,
                                                                   model,
                                                                   opencood_dataset)
@@ -155,50 +157,29 @@ def main():
             # opv2v_original_gt_box_tensor
 
             for criteria, result_stat_dict in result_stats.items():
-                # filter prediction and gt bounding box by difficulty
-                if criteria == 'easy':
-                    criteria_level = 0
-                elif criteria == 'moderate':
-                    criteria_level = 1
-                elif criteria == 'hard':
-                    criteria_level = 2
-                elif criteria == 'very_hard':
-                    criteria_level = 3
+                # without criteria
+                if criteria == 'all':
+                    for iou_treshold in [0.3, 0.5, 0.7]:
+                        eval_utils.caluclate_tp_fp(
+                            pred_box_tensor,
+                            pred_score,
+                            gt_box_tensor,
+                            result_stat_dict,
+                            iou_treshold)
                 else:
-                    criteria_level = -1  # all
-                
-                # filter the gt_box by difficulty
-                if criteria_level == -1:
-                    filtered_gt_box_tensor = gt_box_tensor
-                else:
-                    # selected_ids = []
-                    # selected_object_ids = set()
-                    # for i, sel_id in enumerate(temporal_object_visibility_mapping):
-                    #     if temporal_object_visibility_mapping[sel_id] == criteria_level:
-                    #         selected_ids.append(i)
-                    #         selected_object_ids.add(sel_id)
-                    
-                    # filtered_gt_box_tensor = gt_box_tensor[selected_ids]
-                    filtered_gt_box_tensor = gt_box_tensor
-
-                eval_utils.caluclate_tp_fp(
-                    pred_box_tensor,
-                    pred_score,
-                    filtered_gt_box_tensor,
-                    result_stat_dict,
-                    0.3)
-                eval_utils.caluclate_tp_fp(
-                    pred_box_tensor,
-                    pred_score,
-                    filtered_gt_box_tensor,
-                    result_stat_dict,
-                    0.5)
-                eval_utils.caluclate_tp_fp(
-                    pred_box_tensor,
-                    pred_score,
-                    filtered_gt_box_tensor,
-                    result_stat_dict,
-                    0.7)
+                    for iou_treshold in [0.3, 0.5, 0.7]:
+                        gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
+                        gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
+                        camera_lidar_transform = batch_data[-1]['ego']['camera_lidar_transform']
+                        eval_utils.caluclate_tp_fp_kitti(
+                            pred_box_tensor,
+                            pred_score,
+                            gt_box_tensor,
+                            result_stat_dict,
+                            iou_treshold,
+                            gt_object_ids_criteria,
+                            kitti_criteria_props[criteria],
+                            camera_lidar_transform)
             if opt.save_npy:
                 npy_save_path = os.path.join(opt.model_dir, 'npy')
                 if not os.path.exists(npy_save_path):

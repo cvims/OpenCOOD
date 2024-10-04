@@ -321,7 +321,8 @@ class BaseDataset(Dataset):
                                 'camera_extrinsic_to_ego_lidar':
                                     camera_extrinsic_to_ego_lidar,
                                 'camera_extrinsic_to_ego':
-                                    camera_extrinsic_to_ego}
+                                    camera_extrinsic_to_ego,
+                                'image_path': cav_content[timestamp]['cameras'][i]}
             camera_params.update({'camera%d' % i: cur_camera_param})
 
         return camera_params
@@ -390,7 +391,7 @@ class BaseDataset(Dataset):
         # we need to calculate the transformation matrix from cav to ego
         # at the delayed timestamp
         delay_cav_lidar_pose = delay_params['lidar_pose']
-        delay_ego_lidar_pose = delay_ego_params["lidar_pose"]
+        delay_ego_lidar_pose = delay_ego_params['lidar_pose']
 
         cur_ego_lidar_pose = cur_ego_params['lidar_pose']
         cur_cav_lidar_pose = cur_params['lidar_pose']
@@ -487,12 +488,12 @@ class BaseDataset(Dataset):
         cav_data = OrderedDict()
         cav_data['ego'] = cav_content['ego']
         cav_data['params'] = self.reform_param(cav_content, ego_cav_content, timestamp_key, timestamp_key_delay, cur_ego_pose_flag)
+        cav_data['camera_params'] = self.reform_camera_param(cav_content, ego_cav_content, timestamp_key)
         
         if load_lidar_data:
             cav_data['lidar_np'] = pcd_to_np(cav_content[timestamp_key_delay]['lidar'], self.sensor_cache_container)
 
         if load_camera_data:
-            cav_data['camera_params'] = self.reform_camera_param(cav_content, ego_cav_content, timestamp_key)
             cav_data['camera_np'] = load_rgb_from_files(cav_content[timestamp_key_delay]['cameras'], self.sensor_cache_container)
         
         return cav_data

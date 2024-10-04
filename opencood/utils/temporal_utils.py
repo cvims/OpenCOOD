@@ -36,7 +36,7 @@ def set_category_by_camera_props(camera_props: dict, category_config: dict):
     cam_prop_truncation = 0.0 if camera_props['truncation'] is None else camera_props['truncation']
 
     # List of categories in descending order of difficulty
-    categories = ['easy', 'moderate', 'hard', 'very_hard']
+    categories = list(category_config.keys())
 
     # Iterate over the categories and check conditions
     for category in categories:

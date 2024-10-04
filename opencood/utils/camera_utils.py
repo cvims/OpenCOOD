@@ -160,7 +160,7 @@ def filter_bbx_out_scope(objects, image_w, image_h):
     points_in_canvas_mask = np.any(points_in_canvas_mask, axis=1)
     filtered_objects = objects[points_in_canvas_mask]
 
-    return filtered_objects
+    return filtered_objects, points_in_canvas_mask
 
 
 def draw_2d_bbx(image, objects, color=(255, 0, 0), thickness=2):
@@ -190,20 +190,20 @@ def draw_2d_bbx(image, objects, color=(255, 0, 0), thickness=2):
     image_h = image.shape[0]
     output_image = image.copy()
 
-    object_2d_coords = np.zeros((objects.shape[0], 2, 3))
-    filtered_objects = filter_bbx_out_scope(objects, image_w, image_h)
+    # object_2d_coords = np.zeros((objects.shape[0], 2, 3))
+    filtered_objects, mask = filter_bbx_out_scope(objects, image_w, image_h)
 
     for i in range(filtered_objects.shape[0]):
         object_3d_coords = filtered_objects[i]
         object_2d_coord = p3d_to_p2d_bb(object_3d_coords)
-        object_2d_coords[i] = object_2d_coord
+        # object_2d_coords[i] = object_2d_coord
 
         cv2.rectangle(output_image,
                       (int(object_2d_coord[0, 0]), int(object_2d_coord[0, 1])),
                       (int(object_2d_coord[1, 0]), int(object_2d_coord[1, 1])),
                       color, thickness)
 
-    return output_image
+    return output_image, filtered_objects, mask
 
 
 def draw_3d_bbx(image, objects, color=(0, 255, 0), thickness=2):

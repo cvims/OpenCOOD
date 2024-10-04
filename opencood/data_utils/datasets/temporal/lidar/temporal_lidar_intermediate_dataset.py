@@ -50,8 +50,6 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         scenario_processed = []
 
         prev_ego_id = -999
-
-        all_processed_data = []
         all_in_range_vehicles = []
         all_visible_vehicles = []
 
@@ -83,7 +81,6 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
         # process all vehicles in ego perspective so that the temporal approach can simply restore them without recalculating
         processed_data = self.get_item_single_car(ego_content, ego_lidar_pose) #, range_filter=self.full_object_range)
-        all_processed_data.append(processed_data)
         ego_range_vehicles = {v_id: ego_vehicles[v_id] for v_id in processed_data['object_ids']}
 
         for s_idx, data_sample in enumerate(scenario_samples):
@@ -96,6 +93,9 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
             processed_features = []
             object_stack = []
             object_id_stack = []
+
+            # only for inference
+            camera_lidar_transform = []
 
             # prior knowledge for time delay correction and indicating data type
             # (V2V vs V2i)
@@ -137,6 +137,8 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
                 velocity.append(selected_cav_processed['velocity'])
                 time_delay.append(float(selected_cav_base['time_delay']))
+                camera_lidar_transform.append(selected_cav_base['camera_params'])
+
                 # this is only useful when proj_first = True, and communication
                 # delay is considered. Right now only V2X-ViT utilizes the
                 # spatial_correction. There is a time delay when the cavs project
@@ -231,6 +233,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 'cav_num': cav_num,
                 'velocity': velocity,
                 'time_delay': time_delay,
+                'camera_lidar_transform': camera_lidar_transform,
                 'infra': infra,
                 'spatial_correction_matrix': spatial_correction_matrix,
                 'pairwise_t_matrix': pairwise_t_matrix,
@@ -645,7 +648,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                                     'record_len': record_len,
                                     'label_dict': label_torch_dict,
                                     'object_ids': object_ids,
-                                    'object_detection_info_mapping': object_detection_info_mapping_list,
+                                    'object_detection_info_mapping': object_detection_info_mapping_list[-1],
                                     'prior_encoding': prior_encoding,
                                     'spatial_correction_matrix': spatial_correction_matrix_list,
                                     'pairwise_t_matrix': pairwise_t_matrix})
@@ -655,6 +658,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                     np.array(downsample_lidar_minimum(pcd_np_list=origin_lidar))
                 origin_lidar = torch.from_numpy(origin_lidar)
                 output_dict['ego'].update({'origin_lidar': origin_lidar})
+
             output_dict_list.append(output_dict)
 
         return output_dict_list
@@ -670,6 +674,16 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                     torch.from_numpy(np.array(
                         batch[0][i]['ego'][
                             'anchor_box']))})
+            
+            output_dict_list[i]['ego']['camera_lidar_transform'] = batch[0][i]['ego']['camera_lidar_transform']
+            # to torch
+            for j, cav_transform in enumerate(output_dict_list[i]['ego']['camera_lidar_transform']):
+                for cam_key in cav_transform:
+                    for cam_attr in cav_transform[cam_key]:
+                        if cam_attr == 'image_path':
+                            continue
+                        output_dict_list[i]['ego']['camera_lidar_transform'][j][cam_key][cam_attr] = \
+                            torch.from_numpy(np.array(output_dict_list[i]['ego']['camera_lidar_transform'][j][cam_key][cam_attr]))
 
             # save the transformation matrix (4, 4) to ego vehicle
             transformation_matrix_torch = \
@@ -701,9 +715,9 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         pred_box_tensor, pred_score = \
             self.post_processor.post_process(data_dict, output_dict)
         
-        gt_box_tensor, object_detection_info = self.post_processor.generate_gt_bbx(data_dict)
+        gt_box_tensor, gt_object_ids = self.post_processor.generate_gt_bbx(data_dict)
         
-        return pred_box_tensor, pred_score, gt_box_tensor, object_detection_info
+        return pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids
 
 
 if __name__ == '__main__':
