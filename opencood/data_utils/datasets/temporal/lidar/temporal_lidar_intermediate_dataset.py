@@ -123,7 +123,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                         # ego_range_vehicles[v_id]['lidar_hits'] += selected_cav_base['vehicles'][v_id]['lidar_hits']
                         # Update KITTI criteria for cooperative perception
                         # CAVs can have easier visibility criteria than ego
-                        updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['params']['vehicles'][v_id])
+                        updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['params']['vehicles'][v_id], self.kitti_detection_criteria)
                         ego_range_vehicles[v_id]['kitti_criteria'] = updated_kitti_criteria['kitti_criteria']
                         ego_range_vehicles[v_id]['kitti_criteria_props'] = updated_kitti_criteria['kitti_criteria_props']
                         # opv2v visible
@@ -238,6 +238,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 'spatial_correction_matrix': spatial_correction_matrix,
                 'pairwise_t_matrix': pairwise_t_matrix,
                 'cav_ids': cav_ids,
+                'ego_pose': ego_loc,
                 # 'prev_pose_offsets': prev_pose_offsets
             })
 
@@ -566,6 +567,8 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         for j in range(len(batch[0])):
             output_dict = {'ego': {}}
 
+            ego_pose = []
+
             object_bbx_center = []
             object_bbx_mask = []
             object_ids = []
@@ -593,6 +596,8 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
             # Batch iteration itself
             for i in range(len(batch)):
                 ego_dict = batch[i][j]['ego']
+                ego_pose.append(ego_dict['ego_pose'])
+
                 object_bbx_center.append(ego_dict['object_bbx_center'])
                 object_bbx_mask.append(ego_dict['object_bbx_mask'])
                 object_ids.append(ego_dict['object_ids'])
@@ -651,7 +656,8 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                                     'object_detection_info_mapping': object_detection_info_mapping_list[-1],
                                     'prior_encoding': prior_encoding,
                                     'spatial_correction_matrix': spatial_correction_matrix_list,
-                                    'pairwise_t_matrix': pairwise_t_matrix})
+                                    'pairwise_t_matrix': pairwise_t_matrix,
+                                    'ego_pose': ego_pose[0]})
 
             if self.visualize:
                 origin_lidar = \

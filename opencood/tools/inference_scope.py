@@ -178,6 +178,7 @@ def main():
                             result_stat_dict,
                             iou_treshold,
                             gt_object_ids_criteria,
+                            criteria,
                             kitti_criteria_props[criteria],
                             camera_lidar_transform)
             if opt.save_npy:

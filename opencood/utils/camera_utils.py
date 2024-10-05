@@ -5,6 +5,7 @@ import os
 import concurrent.futures
 import cv2
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 
@@ -110,6 +111,69 @@ def project_3d_to_camera(objects, intrinsic, extrinsic):
     return bbx_camera_3d
 
 
+def project_3d_to_camera_torch(objects, intrinsic, extrinsic):
+    """
+    Project objects under LiDAR coordinate to camera space.
+
+    Parameters
+    ----------
+    objects : torch.Tensor
+         Objects 3D coordinates under LiDAR frame: (N, 8, 3).
+    intrinsic : torch.Tensor
+        Camera intrinsics.
+    extrinsic : torch.Tensor
+        LiDAR to camera extrinsic.
+    Returns
+    -------
+    bbx_camera_3d : torch.Tensor
+        The object position under camera coordinate frame, (N, 8, 3)
+    """
+    device = objects.device
+    if not isinstance(intrinsic, torch.Tensor):
+        intrinsic = torch.tensor(intrinsic, device=device, dtype=torch.float32)
+    if not isinstance(extrinsic, torch.Tensor):
+        extrinsic = torch.tensor(extrinsic, device=device, dtype=torch.float32)
+
+    bbx_camera_3d = torch.zeros_like(objects)
+
+    for i in range(objects.shape[0]):
+        # shape: (3, 8)
+        object_ = objects[i].T
+        # Add an extra 1.0 at the end of each corner so it becomes of
+        # shape (4, 8) and it can be multiplied by a (4, 4) extrinsic matrix.
+        object_ = torch.cat(
+            [object_, torch.ones(object_.shape[1], device=device).unsqueeze(0)])
+
+        object_in_camera = torch.mm(extrinsic, object_)
+
+        # New we must change from UE4's coordinate system to an "standard"
+        # camera coordinate system (the same used by OpenCV):
+
+        # ^ z                       . z
+        # |                        /
+        # |              to:      +-------> x
+        # | . x                   |
+        # |/                      |
+        # +-------> y             v y
+
+        # (x, y ,z) -> (y, -z, x)
+        point_in_camera_coords = torch.stack([
+            object_in_camera[1],
+            object_in_camera[2] * -1,
+            object_in_camera[0]])
+        point_in_camera_coords = torch.mm(intrinsic, point_in_camera_coords)
+
+        # normalize x, y, z
+        point_in_camera_coords = torch.stack([
+            point_in_camera_coords[0, :] / point_in_camera_coords[2, :],
+            point_in_camera_coords[1, :] / point_in_camera_coords[2, :],
+            point_in_camera_coords[2, :]])
+
+        bbx_camera_3d[i] = point_in_camera_coords.T
+
+    return bbx_camera_3d
+
+
 def p3d_to_p2d_bb(p3d_bb):
     """
     Draw 2d bounding box(4 vertices) from 3d bounding box(8 vertices). 2D
@@ -158,6 +222,35 @@ def filter_bbx_out_scope(objects, image_w, image_h):
         (objects[:, :, 1] > 0.0) & (objects[:, :, 1] < image_h) & \
         (objects[:, :, 2] > 0.0)
     points_in_canvas_mask = np.any(points_in_canvas_mask, axis=1)
+    filtered_objects = objects[points_in_canvas_mask]
+
+    return filtered_objects, points_in_canvas_mask
+
+
+def filter_bbx_out_scope_torch(objects, image_w, image_h):
+    """
+    Filter out the objects whose coordinates are out of the image scope.
+
+    Parameters
+    ----------
+    objects : torch.Tensor
+        The object coordinates under camera coordinate frame. (N, 8, 3)
+    image_w : int
+        Image width.
+    image_h : int
+        Image height.
+
+    Returns
+    -------
+    Remaining bounding boxes.
+    """
+
+    # remove the objects that is out of the camera scope.
+    points_in_canvas_mask = \
+        (objects[:, :, 0] > 0.0) & (objects[:, :, 0] < image_w) & \
+        (objects[:, :, 1] > 0.0) & (objects[:, :, 1] < image_h) & \
+        (objects[:, :, 2] > 0.0)
+    points_in_canvas_mask = torch.any(points_in_canvas_mask, dim=1)
     filtered_objects = objects[points_in_canvas_mask]
 
     return filtered_objects, points_in_canvas_mask

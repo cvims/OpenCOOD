@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import torch
 
-from opencood.utils import common_utils, box_utils, camera_utils
+from opencood.utils import common_utils, box_utils, camera_utils, temporal_utils, transformation_utils
 from opencood.hypes_yaml import yaml_utils
 
 
@@ -95,50 +95,80 @@ def caluclate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh):
     result_stat[iou_thresh]['gt'] += gt
 
 
-def caluclate_tp_fp_kitti(det_boxes, det_score, gt_boxes, result_stat, iou_thresh, gt_object_ids_criteria, criteria_props, camera_lidar_transform):
-    bbox_height = criteria_props['bbox_height']
-    occlusion = criteria_props['occlusion']
-    truncation = criteria_props['truncation']
+def caluclate_tp_fp_kitti(
+        det_boxes, det_score, gt_boxes, result_stat, iou_thresh,
+        gt_object_ids_criteria, criteria, criteria_props, camera_lidar_transform,
+        org_image_width=800, org_image_height=600):
+    bbox_height_criteria = criteria_props['bbox_height']
+    occlusion_criteria = criteria_props['occlusion']
+    truncation_criteria = criteria_props['truncation']
     # https://github.com/traveller59/kitti-object-eval-python/blob/master/eval.py
-    """
-        4 -------- 5
-       /|         /|
-      7 -------- 6 .
-      | |        | |
-      . 0 -------- 1
-      |/         |/
-      3 -------- 2
-        corners3d: np.ndarray or torch.Tensor
-        (N, 8, 3), the 8 corners of the bounding box.
-    """
-    # ^ z
-    # |
-    # |
-    # | . x
-    # |/
-    # +-------> y
 
-    det_boxes = det_boxes.cpu().numpy()
-    gt_boxes = gt_boxes.cpu().numpy()
-    # transform det_boxes to camera coordinate
+    criteria_id = temporal_utils.KITTI_DETECTION_CATEGORY_ENUM[criteria]
+
+    # index of gt_object_ids_criteria (with is a dict of key: object_id, value: dict)
+    criteria_considered_gts = set()
+    criteria_considered_gt_criteria = dict()
+    for i, object_id in enumerate(gt_object_ids_criteria):
+        kitti_criteria = gt_object_ids_criteria[object_id]['kitti_criteria']
+        if kitti_criteria <= criteria_id:
+            criteria_considered_gts.add(i)
+            criteria_considered_gt_criteria[i] = gt_object_ids_criteria[object_id]
+
+    # set with index of det_boxes as key
+    criteria_considered_dets = set()
+
     for camera_transform in camera_lidar_transform:
         for camera in camera_transform:
-            camera_extrinsic_to_ego_lidar = camera_transform[camera]['camera_extrinsic'].cpu().numpy()
+            camera_extrinsics = camera_transform[camera]['camera_extrinsic_to_ego_lidar'].cpu().numpy()
             camera_intrinsics = camera_transform[camera]['camera_intrinsic'].cpu().numpy()
 
-            cam_boxes = camera_utils.project_3d_to_camera(det_boxes, camera_intrinsics, camera_extrinsic_to_ego_lidar)
-            # to 2d boxes
-            # cam_boxes = box_utils.box3d_to_2d(cam_boxes)
+            print('TODO: Bilder von CAVs haben falsche Projektion, immer noch?')
+
+            # inverse camera extrinsics
+            camera_extrinsics = np.linalg.inv(camera_extrinsics)
+
+            cam_det_boxes = camera_utils.project_3d_to_camera_torch(det_boxes, camera_intrinsics, camera_extrinsics)
             # load image
             image = camera_transform[camera]['image_path']
             image = cv2.imread(image)
-            image, filtered_cam_boxes, filter_mask = camera_utils.draw_2d_bbx(image, cam_boxes)
+            image, filtered_cam_boxes, filter_mask = camera_utils.draw_2d_bbx(image, cam_det_boxes.cpu().numpy())
             # save image
             cv2.imwrite('test.jpg', image)
 
-            bbox_heights = filtered_cam_boxes[:, 0, 1] - filtered_cam_boxes[:, 4, 1]
-            break
+            _, filter_mask = camera_utils.filter_bbx_out_scope_torch(cam_det_boxes, org_image_width, org_image_height)
 
+            # max - min of :,:,1 (keep dims of filtered_cam_boxes)
+            bbox_heights = torch.max(cam_det_boxes[:, :, 1], dim=1)[0] - torch.min(cam_det_boxes[:, :, 1], dim=1)[0]
+
+            min_bbox_height_filter_mask = bbox_heights >= bbox_height_criteria
+            # combine masks
+            filter_mask = torch.logical_and(filter_mask, min_bbox_height_filter_mask)
+
+            # save indices of values that are True
+            criteria_considered_dets.update(torch.nonzero(filter_mask).flatten().tolist())
+
+            # same for gt_boxes
+            cam_gt_boxes = camera_utils.project_3d_to_camera_torch(gt_boxes, camera_intrinsics, camera_extrinsics)
+
+            _, filter_mask = camera_utils.filter_bbx_out_scope_torch(cam_gt_boxes, org_image_width, org_image_height)
+
+            # max - min of :,:,1 (keep dims of filtered_cam_boxes)
+            bbox_heights = torch.max(cam_gt_boxes[:, :, 1], dim=1)[0] - torch.min(cam_gt_boxes[:, :, 1], dim=1)[0]
+
+            min_bbox_height_filter_mask = bbox_heights >= bbox_height_criteria
+            # combine masks
+            filter_mask = torch.logical_and(filter_mask, min_bbox_height_filter_mask)
+
+            # save indices of values that are True
+            criteria_considered_gts.update(torch.nonzero(filter_mask).flatten().tolist())
+    
+    considered_dets = det_boxes[list(criteria_considered_dets)]
+    considered_det_scores = det_score[list(criteria_considered_dets)]
+
+    considered_gts = gt_boxes[list(criteria_considered_gts)]
+
+    return caluclate_tp_fp(considered_dets, considered_det_scores, considered_gts, result_stat, iou_thresh)
 
 def calculate_ap(result_stat, iou, global_sort_detections):
     """

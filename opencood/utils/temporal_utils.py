@@ -270,14 +270,18 @@ def update_temporal_vehicles_list(all_in_range_vehicles_list: list, temporal_veh
     return updated_temporal_vehicles_list
 
 
-def update_kitti_criteria(vehicle_cav1, vehicle_cav2):
+def update_kitti_criteria(vehicle_cav1, vehicle_cav2, category_config):
     new_kitti_vehicle_data = {}
-    # update vehicle_cav1 with kitti criteria of vehicle_cav2 (if the criteria is lower)
-    new_kitti_vehicle_data['kitti_criteria'] = min(vehicle_cav1['kitti_criteria'], vehicle_cav2['kitti_criteria'])
     new_kitti_vehicle_data['kitti_criteria_props'] = {
         'bbox_height': max(vehicle_cav1['kitti_criteria_props']['bbox_height'], vehicle_cav2['kitti_criteria_props']['bbox_height']),
         'occlusion': min(vehicle_cav1['kitti_criteria_props']['occlusion'], vehicle_cav2['kitti_criteria_props']['occlusion']),
         'truncation': min(vehicle_cav1['kitti_criteria_props']['truncation'], vehicle_cav2['kitti_criteria_props']['truncation'])
     }
+
+    # update vehicle_cav1 with kitti criteria of vehicle_cav2 (if the criteria is lower)
+    # new_kitti_vehicle_data['kitti_criteria'] = min(vehicle_cav1['kitti_criteria'], vehicle_cav2['kitti_criteria'])
+
+    # calculate the new kitti criteria
+    new_kitti_vehicle_data['kitti_criteria'] = set_category_by_camera_props(new_kitti_vehicle_data['kitti_criteria_props'], category_config)
 
     return new_kitti_vehicle_data
