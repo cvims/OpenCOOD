@@ -104,7 +104,8 @@ class BasePostprocessor(object):
     def generate_object_center(self,
                                cav_contents,
                                reference_lidar_pose,
-                               range_filter=None):
+                               range_filter=None,
+                               temporal: bool = False):
         """
         Retrieve all objects in a format of (n, 7), where 7 represents
         x, y, z, l, w, h, yaw or x, y, z, h, w, l, yaw.
@@ -130,7 +131,10 @@ class BasePostprocessor(object):
 
         tmp_object_dict = {}
         for cav_content in cav_contents:
-            tmp_object_dict.update(cav_content['params']['vehicles'])
+            if temporal:
+                tmp_object_dict.update(cav_content['params']['temporal_vehicles'])
+            else:
+                tmp_object_dict.update(cav_content['params']['vehicles'])
 
         output_dict = {}
         if range_filter is None:

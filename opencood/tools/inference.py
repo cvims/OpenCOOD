@@ -123,17 +123,17 @@ def main():
                 raise NotImplementedError('Only early, late and intermediate'
                                           'fusion is supported.')
 
-            eval_utils.caluclate_tp_fp(pred_box_tensor,
+            eval_utils.calculate_tp_fp(pred_box_tensor,
                                        pred_score,
                                        gt_box_tensor,
                                        result_stat,
                                        0.3)
-            eval_utils.caluclate_tp_fp(pred_box_tensor,
+            eval_utils.calculate_tp_fp(pred_box_tensor,
                                        pred_score,
                                        gt_box_tensor,
                                        result_stat,
                                        0.5)
-            eval_utils.caluclate_tp_fp(pred_box_tensor,
+            eval_utils.calculate_tp_fp(pred_box_tensor,
                                        pred_score,
                                        gt_box_tensor,
                                        result_stat,

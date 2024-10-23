@@ -230,15 +230,17 @@ def filter_by_opv2v_original_visibility(vehicles: dict):
 def update_temporal_vehicles_list(all_in_range_vehicles_list: list, temporal_vehicles_list: list):
     """
     All vehicles must be filtered before calling this function, e.g. with lidar or camera specific filters (see filter by lidar_hits or filter by camera_props).
-    We update the temporal vehicles list with the latest vehicles of each previos frame.
+    We update the temporal vehicles list with the latest vehicles of each previous frame.
     If a vehicle was visible in the previous frame, we simply add this one to the current frame.
     An exception of adding the previous visible vehicles is when it is out of range from the ego vehicle.
     """
     # Initialize the updated list with the first frame's vehicle data
     updated_temporal_vehicles_list = [temporal_vehicles_list[0]]
 
+    # set the temporal KITTI criteria of the first frame to the KITTI criteria of the first frame (since there is no temporal information)
     for vehicle in updated_temporal_vehicles_list[0].values():
         vehicle['temporal_kitti_criteria'] = vehicle['kitti_criteria']
+        vehicle['temporal_recovered'] = False
 
     for i in range(1, len(temporal_vehicles_list)):
         current_frame = temporal_vehicles_list[i]
@@ -246,24 +248,28 @@ def update_temporal_vehicles_list(all_in_range_vehicles_list: list, temporal_veh
 
         for vehicle in current_frame.values():
             vehicle['temporal_kitti_criteria'] = vehicle['kitti_criteria']
+            vehicle['temporal_recovered'] = False
 
         current_frame_ids = list(current_frame.keys())
         prev_frame_ids = list(prev_frame.keys())
 
         for v_id in prev_frame_ids:
-            if v_id not in current_frame_ids and v_id in all_in_range_vehicles_list[i]:
+            if v_id not in current_frame_ids: # and v_id in all_in_range_vehicles_list[i]:
                 # add the vehicle to the current frame if it was visible in the previous frame (with the coordinates of the current frame)
                 current_frame[v_id] = all_in_range_vehicles_list[i][v_id]
                 # Preserve the visibility data from the previous frame
                 current_frame[v_id]['kitti_criteria'] = prev_frame[v_id].get('kitti_criteria')
-        
-        # update visibility category. Always the lowest category in the temporal stream
-        for vehicle in current_frame.values():
-            # Update lidar visibility if applicable
-            vehicle['temporal_kitti_criteria'] = min(
-                vehicle.get('temporal_kitti_criteria', vehicle['kitti_criteria']),
-                vehicle['kitti_criteria']
-            )
+                current_frame[v_id]['temporal_kitti_criteria'] = prev_frame[v_id].get('temporal_kitti_criteria')
+                current_frame[v_id]['temporal_recovered'] = True
+            else:
+                current_frame[v_id]['temporal_recovered'] = False
+                # choose the lowest the criteria across the temporal stream
+                prev_tmp_kitti_criteria = prev_frame[v_id].get('temporal_kitti_criteria')
+                cur_tmp_kitti_criteria = current_frame[v_id].get('temporal_kitti_criteria')
+                current_frame[v_id]['temporal_kitti_criteria'] = min(
+                    prev_tmp_kitti_criteria,
+                    cur_tmp_kitti_criteria
+                )
         
         updated_temporal_vehicles_list.append(current_frame)
     
@@ -272,14 +278,19 @@ def update_temporal_vehicles_list(all_in_range_vehicles_list: list, temporal_veh
 
 def update_kitti_criteria(vehicle_cav1, vehicle_cav2, category_config):
     new_kitti_vehicle_data = {}
-    new_kitti_vehicle_data['kitti_criteria_props'] = {
-        'bbox_height': max(vehicle_cav1['kitti_criteria_props']['bbox_height'], vehicle_cav2['kitti_criteria_props']['bbox_height']),
-        'occlusion': min(vehicle_cav1['kitti_criteria_props']['occlusion'], vehicle_cav2['kitti_criteria_props']['occlusion']),
-        'truncation': min(vehicle_cav1['kitti_criteria_props']['truncation'], vehicle_cav2['kitti_criteria_props']['truncation'])
-    }
+    # new_kitti_vehicle_data['kitti_criteria_props'] = {
+    #     'bbox_height': max(vehicle_cav1['kitti_criteria_props']['bbox_height'], vehicle_cav2['kitti_criteria_props']['bbox_height']),
+    #     'occlusion': min(vehicle_cav1['kitti_criteria_props']['occlusion'], vehicle_cav2['kitti_criteria_props']['occlusion']),
+    #     'truncation': min(vehicle_cav1['kitti_criteria_props']['truncation'], vehicle_cav2['kitti_criteria_props']['truncation'])
+    # }
 
     # update vehicle_cav1 with kitti criteria of vehicle_cav2 (if the criteria is lower)
     # new_kitti_vehicle_data['kitti_criteria'] = min(vehicle_cav1['kitti_criteria'], vehicle_cav2['kitti_criteria'])
+
+    if vehicle_cav1['kitti_criteria'] > vehicle_cav2['kitti_criteria']:
+        new_kitti_vehicle_data['kitti_criteria_props'] = vehicle_cav2['kitti_criteria_props']
+    else:
+        new_kitti_vehicle_data['kitti_criteria_props'] = vehicle_cav1['kitti_criteria_props']
 
     # calculate the new kitti criteria
     new_kitti_vehicle_data['kitti_criteria'] = set_category_by_camera_props(new_kitti_vehicle_data['kitti_criteria_props'], category_config)

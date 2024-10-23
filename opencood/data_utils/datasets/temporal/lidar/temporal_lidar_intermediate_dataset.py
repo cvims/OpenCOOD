@@ -81,7 +81,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
         # process all vehicles in ego perspective so that the temporal approach can simply restore them without recalculating
         processed_data = self.get_item_single_car(ego_content, ego_lidar_pose) #, range_filter=self.full_object_range)
-        ego_range_vehicles = {v_id: ego_vehicles[v_id] for v_id in processed_data['object_ids']}
+        latest_frame_ego_range_vehicles = {v_id: ego_vehicles[v_id] for v_id in processed_data['object_ids']}
 
         for s_idx, data_sample in enumerate(scenario_samples):
             processed_data_dict = OrderedDict()
@@ -110,17 +110,28 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
             if self.visualize:
                 projected_lidar_stack = []
+            
+            selected_cav_processed_ego = None
 
             # loop over all CAVs to process information
-            for cav_id, selected_cav_base in data_sample.items():
-                selected_cav_processed = self.get_item_single_car(selected_cav_base, ego_lidar_pose)
+            for i, (cav_id, selected_cav_base) in enumerate(data_sample.items()):
+                if selected_cav_base['ego'] and i == 0:
+                    # process all vehicles in ego perspective so that the temporal approach can simply restore them without recalculating
+                    selected_cav_processed_ego = self.get_item_single_car(selected_cav_base, ego_lidar_pose, temporal=True) #, range_filter=self.full_object_range)
+                    ego_range_vehicles = {v_id: selected_cav_base['params']['temporal_vehicles'][v_id] for v_id in selected_cav_processed_ego['object_ids']}
+                    # delete if they are not in range anymore
+                    ego_range_vehicles = {v_id: vehicle for v_id, vehicle in ego_range_vehicles.items() if v_id in latest_frame_ego_range_vehicles}
+                    selected_cav_processed = selected_cav_processed_ego
+                elif selected_cav_base['ego'] is False:
+                    selected_cav_processed = self.get_item_single_car(selected_cav_base, ego_lidar_pose)
+                else:
+                    raise NotImplementedError('Ego has to be the first vehicle in the scenario.')
 
                 if cav_id != ego_id:
                     # add lidar hits of cav to in_range_vehicles
                     for v_id in ego_range_vehicles.keys():
                         if v_id == cav_id:
                             continue
-                        # ego_range_vehicles[v_id]['lidar_hits'] += selected_cav_base['vehicles'][v_id]['lidar_hits']
                         # Update KITTI criteria for cooperative perception
                         # CAVs can have easier visibility criteria than ego
                         updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['params']['vehicles'][v_id], self.kitti_detection_criteria)
@@ -155,7 +166,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 
                 # prev_pose_offsets.append(selected_cav_base['prev_pose_offset'])
                 cav_ids.append(cav_id)
-            
+
             all_in_range_vehicles.append(ego_range_vehicles)
 
             # exclude all repetitive objects
@@ -167,7 +178,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
             # temporal gt stack vehicles
             temporal_gt_stack = self.create_temporal_gt_stack(
-                [all_in_range_vehicles[-1]]
+                all_in_range_vehicles
             )
 
             # all_opv2v_visible_vehicles = []
@@ -177,9 +188,9 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
             visible_vehicle_ids = list(set(temporal_gt_stack.keys()))
 
-            unique_indices = [processed_data['object_ids'].index(x) for x in visible_vehicle_ids]
+            unique_indices = [selected_cav_processed_ego['object_ids'].index(x) for x in visible_vehicle_ids]
 
-            object_stack = processed_data['object_bbx_center'][unique_indices]
+            object_stack = selected_cav_processed_ego['object_bbx_center'][unique_indices]
             object_id_stack = visible_vehicle_ids
 
             object_detection_info_mapping = dict()
@@ -189,6 +200,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 object_detection_info_mapping[v_id]['kitti_criteria_props'] = temporal_gt_stack[v_id]['kitti_criteria_props']
                 object_detection_info_mapping[v_id]['temporal_kitti_criteria'] = temporal_gt_stack[v_id]['temporal_kitti_criteria']
                 object_detection_info_mapping[v_id]['opv2v_visible'] = temporal_gt_stack[v_id]['opv2v_visible']
+                object_detection_info_mapping[v_id]['temporal_recovered'] = temporal_gt_stack[v_id]['temporal_recovered']
 
             # make sure bounding boxes across all frames have the same number
             object_bbx_center = \
@@ -285,16 +297,16 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
 
     def create_temporal_gt_stack(self, all_in_range_vehicles):
-        # category_filtered_vehicles = [filter_vehicles_by_category(vehicle_list, self.kitti_detection_criteria_threshold) for vehicle_list in all_in_range_vehicles]
+        # category_filtered_vehicles = [filter_vehicles_by_category(vehibcle_list, self.kitti_detection_criteria_threshold) for vehicle_list in all_in_range_vehicles]
         category_filtered_vehicles = [filter_by_opv2v_original_visibility(vehicle_list) for vehicle_list in all_in_range_vehicles]
 
         temporal_vehicles_list = update_temporal_vehicles_list(all_in_range_vehicles, category_filtered_vehicles)
 
         # return the object ids of the temporal vehicles
         return temporal_vehicles_list[-1]
-        
 
-    def get_item_single_car(self, selected_cav_base, ego_pose, range_filter=None):
+
+    def get_item_single_car(self, selected_cav_base, ego_pose, range_filter=None, temporal: bool = False):
         """
         Project the lidar and bbx to ego space first, and then do clipping.
 
@@ -318,7 +330,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
         # retrieve objects under ego coordinates
         object_bbx_center, object_bbx_mask, object_ids = \
-            self.post_processor.generate_object_center([selected_cav_base], ego_pose, range_filter=range_filter)
+            self.post_processor.generate_object_center([selected_cav_base], ego_pose, range_filter=range_filter, temporal=True)
 
         # filter lidar
         lidar_np = selected_cav_base['lidar_np']
@@ -728,13 +740,19 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
 if __name__ == '__main__':
     from opencood.hypes_yaml.yaml_utils import load_yaml
+    import torch
+    import tqdm
 
     config_file = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/aaa_test_lidar.yaml'
     params = load_yaml(config_file)
-    params
+
+    params['root_dir'] = '/data/public_datasets/OPV2V/original/test'
 
     dataset = TemporalLidarIntermediateFusionDataset(params, visualize=False, train=True, validate=False)
 
-    batch1 = dataset.__getitem__(200)
-    batch2 = dataset.__getitem__(201)
-    test = dataset.collate_batch([batch1, batch2])
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=16)
+
+    for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
+        pass
+
+    # 490

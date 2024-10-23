@@ -4,9 +4,9 @@
 
 
 import os
-import cv2
 import numpy as np
 import torch
+from scipy.optimize import linear_sum_assignment
 
 from opencood.utils import common_utils, box_utils, camera_utils, temporal_utils, transformation_utils
 from opencood.hypes_yaml import yaml_utils
@@ -38,7 +38,7 @@ def voc_ap(rec, prec):
     return ap, mrec, mpre
 
 
-def caluclate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh):
+def calculate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh):
     """
     Calculate the true positive and false positive numbers of the current
     frames.
@@ -95,14 +95,122 @@ def caluclate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh):
     result_stat[iou_thresh]['gt'] += gt
 
 
-def caluclate_tp_fp_kitti(
+def match_gt_det_hungarian(det_boxes, gt_boxes, iou_thresh):
+    """
+    Match the detection bounding box with the groundtruth bounding box by
+    Hungarian algorithm.
+
+    Parameters
+    ----------
+    det_boxes : torch.Tensor
+        The detection bounding box, shape (N, 8, 3).
+    gt_boxes : torch.Tensor
+        The groundtruth bounding box, shape (M, 8, 3).
+    iou_thresh : float
+        The iou thresh.
+
+    Returns
+    -------
+    matched_pairs : list
+        The matched pairs of detection and groundtruth bounding box by hungarian algorithm.
+    """
+    # Step 1: Calculate IoU between each detection and ground truth box
+    iou_matrix = calculate_iou(det_boxes, gt_boxes)
+    
+    # Step 2: Create the cost matrix (1 - IoU) for the Hungarian algorithm
+    cost_matrix = 1 - iou_matrix.cpu().numpy()  # convert to numpy for linear_sum_assignment
+
+    # Step 3: Apply Hungarian Algorithm (linear sum assignment)
+    det_indices, gt_indices = linear_sum_assignment(cost_matrix)
+    
+    # Step 4: Filter matched pairs by IoU threshold
+    matched_pairs = []
+    for det_idx, gt_idx in zip(det_indices, gt_indices):
+        if iou_matrix[det_idx, gt_idx] >= iou_thresh:
+            matched_pairs.append((det_idx, gt_idx))
+    
+    return matched_pairs
+
+
+def calculate_iou(det_boxes, gt_boxes):
+    """
+    Calculate the IoU between detection and groundtruth bounding box.
+
+    Parameters
+    ----------
+    det_boxes : torch.Tensor
+        The detection bounding box, shape (N, 8, 3).
+    gt_boxes : torch.Tensor
+        The groundtruth bounding box, shape (M, 8, 3).
+    
+    Returns
+    -------
+    iou_matrix : torch.Tensor
+        The IoU matrix, shape (N, M).
+    """
+    # convert bounding boxes to numpy array
+    det_boxes = common_utils.torch_tensor_to_numpy(det_boxes)
+    gt_boxes = common_utils.torch_tensor_to_numpy(gt_boxes)
+
+    # convert bounding boxes to polygon format
+    det_polygon_list = list(common_utils.convert_format(det_boxes))
+    gt_polygon_list = list(common_utils.convert_format(gt_boxes))
+
+    # calculate IoU between each detection and ground truth box
+    iou_matrix = np.zeros((len(det_polygon_list), len(gt_polygon_list)))
+    for i in range(len(det_polygon_list)):
+        iou_matrix[i, :] = common_utils.compute_iou(det_polygon_list[i], gt_polygon_list)
+
+    return torch.tensor(iou_matrix)
+
+
+def calculate_tp_fp_kitti(
         det_boxes, det_score, gt_boxes, result_stat, iou_thresh,
         gt_object_ids_criteria, criteria, criteria_props, camera_lidar_transform,
+        use_normal_gts=True, use_temporal_recovered_gts=False,
         org_image_width=800, org_image_height=600):
+
+    # match detection and groundtruth bounding box by Hungarian algorithm
+    matched_pairs_indices = match_gt_det_hungarian(det_boxes, gt_boxes, iou_thresh)
+    unmatched_detections_indices = set(range(det_boxes.shape[0])) - set([pair[0] for pair in matched_pairs_indices])
+
+    filter_gts_idx = set()
+    if use_normal_gts and use_temporal_recovered_gts:
+        pass
+    elif use_temporal_recovered_gts:
+        # search for gt_object_ids_criteria with property temporal_recovered
+        filter_gts_idx = {i for i, gt_idx in enumerate(gt_object_ids_criteria) if gt_object_ids_criteria[gt_idx]['temporal_recovered']}
+        # if filter_gt_ids is empty, set it to -1
+        if len(filter_gts_idx) == 0:
+            # if there are no temporal recovered gts, return
+            filter_gts_idx = set([-1])
+    elif use_normal_gts:
+        filter_gts_idx = {i for i, gt_idx in enumerate(gt_object_ids_criteria) if not gt_object_ids_criteria[gt_idx]['temporal_recovered']}
+    else:
+        raise Exception('Either use_normal_gts or use_temporal_recovered_gts must be True')
+    
+    if len(filter_gts_idx) == 1 and -1 in filter_gts_idx:
+        # nothing to do
+        return
+    
+    if len(filter_gts_idx) > 0:
+        # second dim of matched_pairs_indices is the index of gt_boxes
+        # filter out the matched pairs that are not temporal recovered
+        matched_pairs_indices = [(det_idx, gt_idx) for det_idx, gt_idx in matched_pairs_indices if gt_idx in filter_gts_idx]
+
+        # # get det_boxes, det_score, and gt_boxes with indices
+        # det_boxes = det_boxes[[pair[0] for pair in matched_pairs_indices]]
+        # det_score = det_score[[pair[0] for pair in matched_pairs_indices]]
+        # gt_boxes = gt_boxes[[pair[1] for pair in matched_pairs_indices]]
+
+        # filter_gts_idx to actual key
+        gts_keys = list(gt_object_ids_criteria.keys())
+        gts_keys = {gts_keys[i] for i in filter_gts_idx}
+        gt_object_ids_criteria = {gt_idx: gt_object_ids_criteria[gt_idx] for gt_idx in gts_keys}
+
     bbox_height_criteria = criteria_props['bbox_height']
-    occlusion_criteria = criteria_props['occlusion']
-    truncation_criteria = criteria_props['truncation']
-    # https://github.com/traveller59/kitti-object-eval-python/blob/master/eval.py
+    # occlusion_criteria = criteria_props['occlusion']
+    # truncation_criteria = criteria_props['truncation']
 
     criteria_id = temporal_utils.KITTI_DETECTION_CATEGORY_ENUM[criteria]
 
@@ -114,61 +222,167 @@ def caluclate_tp_fp_kitti(
         if kitti_criteria <= criteria_id:
             criteria_considered_gts.add(i)
             criteria_considered_gt_criteria[i] = gt_object_ids_criteria[object_id]
+    
+    # remove matched pairs that are not considered based on criteria
+    matched_pairs_indices = [(det_idx, gt_idx) for det_idx, gt_idx in matched_pairs_indices if gt_idx in criteria_considered_gts]
 
-    # set with index of det_boxes as key
-    criteria_considered_dets = set()
+    matched_det_boxes = det_boxes[[pair[0] for pair in matched_pairs_indices]]
+    matched_det_scores = det_score[[pair[0] for pair in matched_pairs_indices]]
+    unmatched_det_boxes = det_boxes[list(unmatched_detections_indices)]
+    unmatched_det_scores = det_score[list(unmatched_detections_indices)]
 
+    matched_gt_boxes = gt_boxes[[pair[1] for pair in matched_pairs_indices]]
+
+    # For all unmatched det boxes, check bounding box height (in camera coordinates)
+    # So that only the detections with the the bounding box height of the chosen criteria are considered
+    unmatched_considered_dets_indices = set()
     for camera_transform in camera_lidar_transform:
         for camera in camera_transform:
             camera_extrinsics = camera_transform[camera]['camera_extrinsic_to_ego_lidar'].cpu().numpy()
             camera_intrinsics = camera_transform[camera]['camera_intrinsic'].cpu().numpy()
 
-            print('TODO: Bilder von CAVs haben falsche Projektion, immer noch?')
-
             # inverse camera extrinsics
             camera_extrinsics = np.linalg.inv(camera_extrinsics)
 
-            cam_det_boxes = camera_utils.project_3d_to_camera_torch(det_boxes, camera_intrinsics, camera_extrinsics)
-            # load image
-            image = camera_transform[camera]['image_path']
-            image = cv2.imread(image)
-            image, filtered_cam_boxes, filter_mask = camera_utils.draw_2d_bbx(image, cam_det_boxes.cpu().numpy())
-            # save image
-            cv2.imwrite('test.jpg', image)
+            unmatched_cam_det_boxes = camera_utils.project_3d_to_camera_torch(unmatched_det_boxes, camera_intrinsics, camera_extrinsics)
+            # # load image
+            # image = camera_transform[camera]['image_path']
+            # image = cv2.imread(image)
+            # image, filtered_cam_boxes, filter_mask = camera_utils.draw_2d_bbx(image, cam_det_boxes.cpu().numpy())
+            # # save image
+            # cv2.imwrite('test.jpg', image)
 
-            _, filter_mask = camera_utils.filter_bbx_out_scope_torch(cam_det_boxes, org_image_width, org_image_height)
+            _, filter_mask = camera_utils.filter_bbx_out_scope_torch(unmatched_cam_det_boxes, org_image_width, org_image_height)
 
             # max - min of :,:,1 (keep dims of filtered_cam_boxes)
-            bbox_heights = torch.max(cam_det_boxes[:, :, 1], dim=1)[0] - torch.min(cam_det_boxes[:, :, 1], dim=1)[0]
+            bbox_heights = torch.max(unmatched_cam_det_boxes[:, :, 1], dim=1)[0] - torch.min(unmatched_cam_det_boxes[:, :, 1], dim=1)[0]
 
             min_bbox_height_filter_mask = bbox_heights >= bbox_height_criteria
             # combine masks
             filter_mask = torch.logical_and(filter_mask, min_bbox_height_filter_mask)
 
             # save indices of values that are True
-            criteria_considered_dets.update(torch.nonzero(filter_mask).flatten().tolist())
+            unmatched_considered_dets_indices.update(torch.nonzero(filter_mask).flatten().tolist())
 
-            # same for gt_boxes
-            cam_gt_boxes = camera_utils.project_3d_to_camera_torch(gt_boxes, camera_intrinsics, camera_extrinsics)
+    unmatched_considered_dets_indices = list(unmatched_considered_dets_indices)
+    if unmatched_considered_dets_indices:
+        unmatched_considered_dets = unmatched_det_boxes[unmatched_considered_dets_indices]
+        unmatched_considered_det_scores = unmatched_det_scores[unmatched_considered_dets_indices]
 
-            _, filter_mask = camera_utils.filter_bbx_out_scope_torch(cam_gt_boxes, org_image_width, org_image_height)
-
-            # max - min of :,:,1 (keep dims of filtered_cam_boxes)
-            bbox_heights = torch.max(cam_gt_boxes[:, :, 1], dim=1)[0] - torch.min(cam_gt_boxes[:, :, 1], dim=1)[0]
-
-            min_bbox_height_filter_mask = bbox_heights >= bbox_height_criteria
-            # combine masks
-            filter_mask = torch.logical_and(filter_mask, min_bbox_height_filter_mask)
-
-            # save indices of values that are True
-            criteria_considered_gts.update(torch.nonzero(filter_mask).flatten().tolist())
-    
-    considered_dets = det_boxes[list(criteria_considered_dets)]
-    considered_det_scores = det_score[list(criteria_considered_dets)]
+        # combine matched and unmatched detections
+        considered_dets = torch.cat([matched_det_boxes, unmatched_considered_dets], dim=0)
+        considered_det_scores = torch.cat([matched_det_scores, unmatched_considered_det_scores], dim=0)
+    else:
+        considered_dets = matched_det_boxes
+        considered_det_scores = matched_det_scores
 
     considered_gts = gt_boxes[list(criteria_considered_gts)]
 
-    return caluclate_tp_fp(considered_dets, considered_det_scores, considered_gts, result_stat, iou_thresh)
+    calculate_tp_fp(considered_dets, considered_det_scores, considered_gts, result_stat, iou_thresh)
+
+
+def calculate_tp_fp_kitti_temporal_recovered(
+        det_boxes, det_score, gt_boxes, result_stat, iou_thresh,
+        gt_object_ids_criteria, criteria, criteria_props, camera_lidar_transform,
+        org_image_width=800, org_image_height=600):
+    
+    matched_pairs_indices = match_gt_det_hungarian(det_boxes, gt_boxes, iou_thresh)
+    # search for gt_object_ids_criteria with property temporal_recovered
+    temporal_recovered_ids = {i for i, gt_idx in enumerate(gt_object_ids_criteria) if gt_object_ids_criteria[gt_idx]['temporal_recovered']}
+
+    if not temporal_recovered_ids:
+        return
+
+    # second dim of matched_pairs_indices is the index of gt_boxes
+    # filter out the matched pairs that are not temporal recovered
+    matched_pairs_indices = [(det_idx, gt_idx) for det_idx, gt_idx in matched_pairs_indices if gt_idx in temporal_recovered_ids]
+
+    # get det_boxes, det_score, and gt_boxes with indices
+    matched_det_boxes = det_boxes[[pair[0] for pair in matched_pairs_indices]]
+    matched_det_scores = det_score[[pair[0] for pair in matched_pairs_indices]]
+    matched_gt_boxes = gt_boxes[[pair[1] for pair in matched_pairs_indices]]
+
+    temporal_recovered_gt_object_ids_criteria = {gt_idx: gt_object_ids_criteria[gt_idx] for gt_idx in temporal_recovered_ids}
+
+    return calculate_tp_fp_kitti(
+        matched_det_boxes, matched_det_scores, matched_gt_boxes, result_stat, iou_thresh,
+        temporal_recovered_gt_object_ids_criteria, criteria, criteria_props, camera_lidar_transform,
+        org_image_width, org_image_height)                                 
+
+
+# def caluclate_tp_fp_kitti(
+#         det_boxes, det_score, gt_boxes, result_stat, iou_thresh,
+#         gt_object_ids_criteria, criteria, criteria_props, camera_lidar_transform,
+#         org_image_width=800, org_image_height=600):
+
+#     bbox_height_criteria = criteria_props['bbox_height']
+#     occlusion_criteria = criteria_props['occlusion']
+#     truncation_criteria = criteria_props['truncation']
+#     # https://github.com/traveller59/kitti-object-eval-python/blob/master/eval.py
+
+#     criteria_id = temporal_utils.KITTI_DETECTION_CATEGORY_ENUM[criteria]
+
+#     # index of gt_object_ids_criteria (with is a dict of key: object_id, value: dict)
+#     criteria_considered_gts = set()
+#     criteria_considered_gt_criteria = dict()
+#     for i, object_id in enumerate(gt_object_ids_criteria):
+#         kitti_criteria = gt_object_ids_criteria[object_id]['kitti_criteria']
+#         if kitti_criteria <= criteria_id:
+#             criteria_considered_gts.add(i)
+#             criteria_considered_gt_criteria[i] = gt_object_ids_criteria[object_id]
+
+#     # set with index of det_boxes as key
+#     criteria_considered_dets = set()
+
+#     for camera_transform in camera_lidar_transform:
+#         for camera in camera_transform:
+#             camera_extrinsics = camera_transform[camera]['camera_extrinsic_to_ego_lidar'].cpu().numpy()
+#             camera_intrinsics = camera_transform[camera]['camera_intrinsic'].cpu().numpy()
+
+#             # inverse camera extrinsics
+#             camera_extrinsics = np.linalg.inv(camera_extrinsics)
+
+#             cam_det_boxes = camera_utils.project_3d_to_camera_torch(det_boxes, camera_intrinsics, camera_extrinsics)
+#             # # load image
+#             # image = camera_transform[camera]['image_path']
+#             # image = cv2.imread(image)
+#             # image, filtered_cam_boxes, filter_mask = camera_utils.draw_2d_bbx(image, cam_det_boxes.cpu().numpy())
+#             # # save image
+#             # cv2.imwrite('test.jpg', image)
+
+#             _, filter_mask = camera_utils.filter_bbx_out_scope_torch(cam_det_boxes, org_image_width, org_image_height)
+
+#             # max - min of :,:,1 (keep dims of filtered_cam_boxes)
+#             bbox_heights = torch.max(cam_det_boxes[:, :, 1], dim=1)[0] - torch.min(cam_det_boxes[:, :, 1], dim=1)[0]
+
+#             min_bbox_height_filter_mask = bbox_heights >= bbox_height_criteria
+#             # combine masks
+#             filter_mask = torch.logical_and(filter_mask, min_bbox_height_filter_mask)
+
+#             # save indices of values that are True
+#             criteria_considered_dets.update(torch.nonzero(filter_mask).flatten().tolist())
+
+#             # same for gt_boxes
+#             cam_gt_boxes = camera_utils.project_3d_to_camera_torch(gt_boxes, camera_intrinsics, camera_extrinsics)
+
+#             _, filter_mask = camera_utils.filter_bbx_out_scope_torch(cam_gt_boxes, org_image_width, org_image_height)
+
+#             # max - min of :,:,1 (keep dims of filtered_cam_boxes)
+#             bbox_heights = torch.max(cam_gt_boxes[:, :, 1], dim=1)[0] - torch.min(cam_gt_boxes[:, :, 1], dim=1)[0]
+
+#             min_bbox_height_filter_mask = bbox_heights >= bbox_height_criteria
+#             # combine masks
+#             filter_mask = torch.logical_and(filter_mask, min_bbox_height_filter_mask)
+
+#             # save indices of values that are True
+#             criteria_considered_gts.update(torch.nonzero(filter_mask).flatten().tolist())
+    
+#     considered_dets = det_boxes[list(criteria_considered_dets)]
+#     considered_det_scores = det_score[list(criteria_considered_dets)]
+
+#     considered_gts = gt_boxes[list(criteria_considered_gts)]
+
+#     return caluclate_tp_fp(considered_dets, considered_det_scores, considered_gts, result_stat, iou_thresh)
 
 def calculate_ap(result_stat, iou, global_sort_detections):
     """
