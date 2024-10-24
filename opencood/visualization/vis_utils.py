@@ -15,6 +15,8 @@ from matplotlib import cm
 from opencood.utils import box_utils
 from opencood.utils import common_utils
 
+import pickle as pkl
+
 VIRIDIS = np.array(cm.get_cmap('plasma').colors)
 VID_RANGE = np.linspace(0.0, 1.0, VIRIDIS.shape[0])
 
@@ -89,6 +91,9 @@ def bbx2oabb(bbx_corner, order='hwl', color=(0, 0, 1)):
     oabbs : list
         The list containing all oriented bounding boxes.
     """
+    if bbx_corner is None:
+        return []
+
     if not isinstance(bbx_corner, np.ndarray):
         bbx_corner = common_utils.torch_tensor_to_numpy(bbx_corner)
 
@@ -278,7 +283,7 @@ def visualize_single_sample_output_gt(pred_tensor,
 
     def custom_draw_geometry(pcd, pred, gt):
         vis = o3d.visualization.Visualizer()
-        vis.create_window()
+        vis.create_window(visible=False)
 
         opt = vis.get_render_option()
         opt.background_color = np.asarray([0, 0, 0])
@@ -317,6 +322,62 @@ def visualize_single_sample_output_gt(pred_tensor,
         custom_draw_geometry(o3d_pcd, oabbs_pred, oabbs_gt)
     if save_path:
         save_o3d_visualization(visualize_elements, save_path)
+
+
+def save_single_sample_output_gt_temporal(
+        pred_tensor, gt_tensor, gt_temporal_recovered_tensor, pcd, save_path='', mode='constant'):
+    if len(pcd.shape) == 3:
+        pcd = pcd[0]
+    origin_lidar = pcd
+    if not isinstance(pcd, np.ndarray):
+        origin_lidar = common_utils.torch_tensor_to_numpy(pcd)
+
+    origin_lidar_intcolor = \
+        color_encoding(origin_lidar[:, -1] if mode == 'intensity'
+                       else origin_lidar[:, 2], mode=mode)
+    # left -> right hand
+    origin_lidar[:, :1] = -origin_lidar[:, :1]
+
+    o3d_pcd = o3d.geometry.PointCloud()
+    o3d_pcd.points = o3d.utility.Vector3dVector(origin_lidar[:, :3])
+    o3d_pcd.colors = o3d.utility.Vector3dVector(origin_lidar_intcolor)
+
+    # Convert the points and colors to lists or NumPy arrays
+    pcd_data = {
+        'points': np.asarray(o3d_pcd.points).tolist(),
+        'colors': np.asarray(o3d_pcd.colors).tolist()
+    }
+
+    oabbs_pred = bbx2oabb(pred_tensor, color=(1, 0, 0))
+    oabbs_gt = bbx2oabb(gt_tensor, color=(0, 1, 0))
+    oabbs_gt_temporal = bbx2oabb(gt_temporal_recovered_tensor, color=(0, 0, 1))
+
+    # Convert oriented bounding boxes to picklable form
+    def oabb_to_data(oabb):
+        return {
+            'points': np.asarray(oabb.get_box_points()).tolist(),  # Convert points to list
+            'color': oabb.color  # Assuming color is a simple list/tuple
+        }
+
+    oabbs_pred_data = [oabb_to_data(oabb) for oabb in oabbs_pred]
+    oabbs_gt_data = [oabb_to_data(oabb) for oabb in oabbs_gt]
+    oabbs_gt_temporal_data = [oabb_to_data(oabb) for oabb in oabbs_gt_temporal]
+
+    # Create a picklable data structure with point cloud and bounding boxes
+    visualize_elements_data = {
+        'pcd': pcd_data,
+        'oabbs_pred': oabbs_pred_data,
+        'oabbs_gt': oabbs_gt_data,
+        'oabbs_gt_temporal': oabbs_gt_temporal_data
+    }
+
+    # Save the data to a pickle file
+    if save_path[-4:] == '.png':
+        save_path = save_path[:-4]
+    save_path += '.pkl'
+
+    with open(save_path, 'wb') as f:
+        pkl.dump(visualize_elements_data, f)
 
 
 def visualize_single_sample_output_bev(pred_box, gt_box, pcd, dataset,
@@ -526,7 +587,7 @@ def visualize_sequence_dataloader(dataloader, order, color_mode='constant'):
         Color rendering mode.
     """
     vis = o3d.visualization.Visualizer()
-    vis.create_window()
+    vis.create_window(visible=False)
 
     vis.get_render_option().background_color = [0.05, 0.05, 0.05]
     vis.get_render_option().point_size = 1.0
@@ -580,7 +641,7 @@ def save_o3d_visualization(element, save_path):
         The save path.
     """
     vis = o3d.visualization.Visualizer()
-    vis.create_window()
+    vis.create_window(visible=False)
     for i in range(len(element)):
         vis.add_geometry(element[i])
         vis.update_geometry(element[i])

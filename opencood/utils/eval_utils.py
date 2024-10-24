@@ -167,7 +167,7 @@ def calculate_iou(det_boxes, gt_boxes):
 def calculate_tp_fp_kitti(
         det_boxes, det_score, gt_boxes, result_stat, iou_thresh,
         gt_object_ids_criteria, criteria, criteria_props, camera_lidar_transform,
-        use_normal_gts=True, use_temporal_recovered_gts=False,
+        use_normal_gts=True, use_temporal_recovered_gts=False, use_temporal_kitti_criteria=False,
         org_image_width=800, org_image_height=600):
 
     # match detection and groundtruth bounding box by Hungarian algorithm
@@ -217,11 +217,19 @@ def calculate_tp_fp_kitti(
     # index of gt_object_ids_criteria (with is a dict of key: object_id, value: dict)
     criteria_considered_gts = set()
     criteria_considered_gt_criteria = dict()
+    if use_temporal_kitti_criteria:
+        attr_key = 'temporal_kitti_criteria'
+    else:
+        attr_key = 'kitti_criteria'
+
     for i, object_id in enumerate(gt_object_ids_criteria):
-        kitti_criteria = gt_object_ids_criteria[object_id]['kitti_criteria']
+        kitti_criteria = gt_object_ids_criteria[object_id][attr_key]
         if kitti_criteria <= criteria_id:
             criteria_considered_gts.add(i)
             criteria_considered_gt_criteria[i] = gt_object_ids_criteria[object_id]
+    
+    if len(criteria_considered_gts) == 0:
+        return
     
     # remove matched pairs that are not considered based on criteria
     matched_pairs_indices = [(det_idx, gt_idx) for det_idx, gt_idx in matched_pairs_indices if gt_idx in criteria_considered_gts]

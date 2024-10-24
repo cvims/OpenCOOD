@@ -585,6 +585,9 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
             object_bbx_mask = []
             object_ids = []
             object_detection_info_mapping_list = []
+
+            cav_ids = []
+
             processed_lidar_list = []
             # used to record different scenario
             record_len = []
@@ -616,6 +619,9 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
                 # new
                 object_detection_info_mapping_list.append(ego_dict['object_detection_info_mapping'])
+
+                # cav ids
+                cav_ids.append(ego_dict['cav_ids'])
 
                 processed_lidar_list.append(ego_dict['processed_lidar'])
                 record_len.append(ego_dict['cav_num'])
@@ -666,6 +672,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                                     'label_dict': label_torch_dict,
                                     'object_ids': object_ids,
                                     'object_detection_info_mapping': object_detection_info_mapping_list[-1],
+                                    'cav_ids': cav_ids,
                                     'prior_encoding': prior_encoding,
                                     'spatial_correction_matrix': spatial_correction_matrix_list,
                                     'pairwise_t_matrix': pairwise_t_matrix,
@@ -738,6 +745,46 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         return pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids
 
 
+    def visualize_result(
+            self,
+            pred_box_tensor,
+            gt_box_tensor,
+            pcd,
+            show_vis,
+            save_path,
+            dataset=None):
+        # we need to convert the pcd from [n, 5] -> [n, 4]
+        pcd = pcd[:, 1:]
+        # visualize the model output
+        self.post_processor.visualize(
+            pred_box_tensor,
+            gt_box_tensor,
+            pcd,
+            show_vis,
+            save_path,
+            dataset=dataset)
+        
+    def save_temporal_point_cloud(
+            self,
+            pred_box_tensor,
+            gt_box_tensor,
+            gt_object_ids_criteria,
+            cav_box_tensor,
+            pcd,
+            save_path):
+        """
+        Save the point cloud with temporal information for visualization.
+        """
+        self.post_processor.save_temporal_point_cloud(
+            pred_box_tensor,
+            gt_box_tensor,
+            gt_object_ids_criteria,
+            cav_box_tensor,
+            pcd,
+            save_path)
+
+
+
 if __name__ == '__main__':
     from opencood.hypes_yaml.yaml_utils import load_yaml
     import torch
@@ -754,5 +801,3 @@ if __name__ == '__main__':
 
     for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
         pass
-
-    # 490

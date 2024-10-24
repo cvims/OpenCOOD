@@ -205,7 +205,8 @@ def save_updated_yaml(cav_yaml_content, additional_yaml_content, vehicle_hits, c
     # merge the two dictionaries
     vehicle_yaml_content.update(all_vehicle_yaml_content)
 
-    # delete cav_id if it exists
+    # filter cav_id if it exists
+    cav_vehicle_content = {int(cav_id): vehicle_yaml_content[int(cav_id)]}
     if int(cav_id) in vehicle_yaml_content:
         del vehicle_yaml_content[int(cav_id)]
 
@@ -217,7 +218,8 @@ def save_updated_yaml(cav_yaml_content, additional_yaml_content, vehicle_hits, c
     #         vehicle_yaml_content[v_id]['lidar_hits'] = 0
     
     # update vehicle section in new_yaml_content
-    new_yaml_content['vehicles'] = vehicle_yaml_content               
+    new_yaml_content['vehicles'] = vehicle_yaml_content
+    new_yaml_content['cav_vehicle'] = cav_vehicle_content             
 
     # save the new yaml                
     yaml_utils.save_yaml(new_yaml_content, new_yaml_file_path)

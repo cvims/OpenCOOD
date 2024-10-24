@@ -430,3 +430,32 @@ class VoxelPostprocessor(BasePostprocessor):
                                                     pcd,
                                                     show_vis,
                                                     save_path)
+
+    @staticmethod
+    def save_temporal_point_cloud(pred_box_tensor, gt_tensor, gt_object_ids_criteria, cav_box_tensor, pcd, save_path):
+        # filter temporal recovered from gt_tensor
+        temporal_recovered_cavs = []
+        for i, cav_id in enumerate(gt_object_ids_criteria):
+            if gt_object_ids_criteria[cav_id]['temporal_recovered']:
+                temporal_recovered_cavs.append(i)
+            
+        gt_temporal_recovered = []
+        if temporal_recovered_cavs:
+            for i in temporal_recovered_cavs:
+                gt_temporal_recovered.append(gt_tensor[i])
+                # remove the temporal recovered cavs from gt_tensor (tensor)
+                gt_tensor = torch.cat([gt_tensor[:i], gt_tensor[i+1:]], dim=0)
+
+        if gt_temporal_recovered:
+            # shape (N, 8, 3)
+            gt_temporal_recovered = torch.stack(gt_temporal_recovered)
+        else:
+            gt_temporal_recovered = None
+
+        vis_utils.save_single_sample_output_gt_temporal(
+            pred_box_tensor,
+            gt_tensor,
+            gt_temporal_recovered,
+            pcd,
+            save_path
+        )

@@ -8,7 +8,7 @@ scipy~=1.5.4
 scikit-image
 tqdm
 PyYAML
-open3d
+open3d==0.17.0
 cython
 tensorboardX
 shapely==2.0.0

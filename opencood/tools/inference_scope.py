@@ -37,6 +37,8 @@ def test_parser():
                              'it can note be set true with show_vis together ')
     parser.add_argument('--save_vis', action='store_true',
                         help='whether to save visualization result')
+    parser.add_argument('--save_vis_path', type=str,
+                        help='path to save visualization result')
     parser.add_argument('--save_npy', action='store_true',
                         help='whether to save prediction and gt result'
                              'in npy_test file')
@@ -64,7 +66,12 @@ def create_result_stat_dict():
 
 
 def main():
+    SAVE_VIS = True
+    VIS_SAVE_PATH = os.path.join('visualization', 'inference', 'scope')
+
     opt = test_parser()
+    opt.save_vis = SAVE_VIS
+    opt.vis_save_path = VIS_SAVE_PATH
     assert opt.fusion_method in ['late', 'early', 'intermediate']
     assert not (opt.show_vis and opt.show_sequence), 'you can only visualize ' \
                                                     'the results in single ' \
@@ -86,7 +93,7 @@ def main():
     print(f"{len(opencood_dataset)} samples found.")
     data_loader = DataLoader(opencood_dataset,
                              batch_size=1,
-                             num_workers=16,
+                             num_workers=1,
                              collate_fn=opencood_dataset.collate_batch_test,
                              shuffle=False,
                              pin_memory=False,
@@ -106,7 +113,7 @@ def main():
 
     # Create the dictionary for evaluation.
     # also store the confidence score for each prediction
-    result_stats_levels = ['all', 'easy', 'moderate', 'hard', 'very_hard', 'none']
+    result_stats_levels = ['all'] #['all', 'easy', 'moderate', 'hard', 'very_hard', 'none']
     result_stats = {level: create_result_stat_dict() for level in result_stats_levels}
 
     temporal_result_stats = {level: create_result_stat_dict() for level in result_stats_levels}
@@ -159,6 +166,11 @@ def main():
             # Evaluate OPV2V originals (same objects as in the original dataset)
             # opv2v_original_gt_box_tensor
 
+            gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
+            gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
+            # batch size = 1, -> batch_data[-1]...[-1]
+            cav_ids = batch_data[-1]['ego']['cav_ids'][-1]
+
             # non-temporal evaluation
             for criteria, result_stat_dict in result_stats.items():
                 # without criteria
@@ -172,8 +184,6 @@ def main():
                             iou_treshold)
                 else:
                     for iou_treshold in [0.3, 0.5, 0.7]:
-                        gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
-                        gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
                         camera_lidar_transform = batch_data[-1]['ego']['camera_lidar_transform']
                         # eval_utils.calculate_tp_fp_kitti(
                         #     pred_box_tensor,
@@ -202,48 +212,48 @@ def main():
                             use_normal_gts=True,
                             use_temporal_recovered_gts=False)
                 
-            # temporal evaluation
-            for criteria, result_stat_dict in temporal_result_stats.items():
-                # without criteria
-                if criteria == 'all':
-                    for iou_treshold in [0.3, 0.5, 0.7]:
-                        eval_utils.calculate_tp_fp(
-                            pred_box_tensor,
-                            pred_score,
-                            gt_box_tensor,
-                            result_stat_dict,
-                            iou_treshold)
-                else:
-                    for iou_treshold in [0.3, 0.5, 0.7]:
-                        gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
-                        gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
-                        camera_lidar_transform = batch_data[-1]['ego']['camera_lidar_transform']
-                        # eval_utils.calculate_tp_fp_kitti(
-                        #     pred_box_tensor,
-                        #     pred_score,
-                        #     gt_box_tensor,
-                        #     result_stat_dict,
-                        #     iou_treshold,
-                        #     gt_object_ids_criteria,
-                        #     criteria,
-                        #     kitti_criteria_props[criteria],
-                        #     camera_lidar_transform,
-                        #     use_normal_gts=True,
-                        #     use_temporal_recovered_gts=False)
+            # # temporal evaluation
+            # for criteria, result_stat_dict in temporal_result_stats.items():
+            #     # without criteria
+            #     if criteria == 'all':
+            #         for iou_treshold in [0.3, 0.5, 0.7]:
+            #             eval_utils.calculate_tp_fp(
+            #                 pred_box_tensor,
+            #                 pred_score,
+            #                 gt_box_tensor,
+            #                 result_stat_dict,
+            #                 iou_treshold)
+            #     else:
+            #         for iou_treshold in [0.3, 0.5, 0.7]:
+            #             gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
+            #             gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
+            #             camera_lidar_transform = batch_data[-1]['ego']['camera_lidar_transform']
+            #             # eval_utils.calculate_tp_fp_kitti(
+            #             #     pred_box_tensor,
+            #             #     pred_score,
+            #             #     gt_box_tensor,
+            #             #     result_stat_dict,
+            #             #     iou_treshold,
+            #             #     gt_object_ids_criteria,
+            #             #     criteria,
+            #             #     kitti_criteria_props[criteria],
+            #             #     camera_lidar_transform,
+            #             #     use_normal_gts=True,
+            #             #     use_temporal_recovered_gts=False)
                         
-                        # only temporal recovered evaluation
-                        eval_utils.calculate_tp_fp_kitti(
-                            pred_box_tensor,
-                            pred_score,
-                            gt_box_tensor,
-                            result_stat_dict,
-                            iou_treshold,
-                            gt_object_ids_criteria,
-                            criteria,
-                            kitti_criteria_props[criteria],
-                            camera_lidar_transform,
-                            use_normal_gts=False,
-                            use_temporal_recovered_gts=True)
+            #             # only temporal recovered evaluation
+            #             eval_utils.calculate_tp_fp_kitti(
+            #                 pred_box_tensor,
+            #                 pred_score,
+            #                 gt_box_tensor,
+            #                 result_stat_dict,
+            #                 iou_treshold,
+            #                 gt_object_ids_criteria,
+            #                 criteria,
+            #                 kitti_criteria_props[criteria],
+            #                 camera_lidar_transform,
+            #                 use_normal_gts=False,
+            #                 use_temporal_recovered_gts=True)
 
             if opt.save_npy:
                 npy_save_path = os.path.join(opt.model_dir, 'npy')
@@ -251,26 +261,35 @@ def main():
                     os.makedirs(npy_save_path)
                 inference_utils.save_prediction_gt(pred_box_tensor,
                                                    gt_box_tensor,
-                                                   batch_data['ego'][
+                                                   batch_data[-1]['ego'][
                                                        'origin_lidar'][0],
                                                    i,
                                                    npy_save_path)
 
             if opt.show_vis or opt.save_vis:
-                vis_save_path = ''
                 if opt.save_vis:
-                    vis_save_path = os.path.join(opt.model_dir, 'vis')
-                    if not os.path.exists(vis_save_path):
-                        os.makedirs(vis_save_path)
-                    vis_save_path = os.path.join(vis_save_path, '%05d.png' % i)
+                    if not os.path.exists(opt.vis_save_path):
+                        os.makedirs(opt.vis_save_path)
+                    vis_save_path = os.path.join(opt.vis_save_path, '%05d.png' % i)
 
-                opencood_dataset.visualize_result(pred_box_tensor,
-                                                  gt_box_tensor,
-                                                  batch_data['ego'][
-                                                      'origin_lidar'],
-                                                  opt.show_vis,
-                                                  vis_save_path,
-                                                  dataset=opencood_dataset)
+                # opencood_dataset.visualize_result(pred_box_tensor,
+                #                                   gt_box_tensor,
+                #                                   batch_data[-1]['ego'][
+                #                                       'origin_lidar'],
+                #                                   opt.show_vis,
+                #                                   vis_save_path,
+                #                                   dataset=opencood_dataset)
+            
+                vis_save_path = os.path.join(opt.vis_save_path, '%05d' % i)
+                # saves the vis as pickle file for later use
+                opencood_dataset.save_temporal_point_cloud(
+                    pred_box_tensor,
+                    gt_box_tensor,
+                    gt_object_ids_criteria,
+                    cav_box_tensor,
+                    batch_data[-1]['ego']['origin_lidar'],
+                    save_path=vis_save_path
+                )
 
             if opt.show_sequence:
                 pcd, pred_o3d_box, gt_o3d_box = \
@@ -309,6 +328,13 @@ def main():
         eval_utils.eval_final_results(result_stat_dict,
                                       opt.model_dir,
                                       opt.global_sort_detections)
+    
+    for criteria, result_stat_dict in temporal_result_stats.items():
+        print(f'Eval results for {criteria} level:')
+        eval_utils.eval_final_results(result_stat_dict,
+                                      opt.model_dir,
+                                      opt.global_sort_detections)
+        
     if opt.show_sequence:
         vis.destroy_window()
 
