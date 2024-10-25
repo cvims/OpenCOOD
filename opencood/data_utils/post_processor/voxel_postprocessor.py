@@ -435,8 +435,8 @@ class VoxelPostprocessor(BasePostprocessor):
     def save_temporal_point_cloud(pred_box_tensor, gt_tensor, gt_object_ids_criteria, cav_box_tensor, pcd, save_path):
         # filter temporal recovered from gt_tensor
         temporal_recovered_cavs = []
-        for i, cav_id in enumerate(gt_object_ids_criteria):
-            if gt_object_ids_criteria[cav_id]['temporal_recovered']:
+        for i, object_id in enumerate(gt_object_ids_criteria):
+            if gt_object_ids_criteria[object_id]['temporal_recovered']:
                 temporal_recovered_cavs.append(i)
             
         gt_temporal_recovered = []
@@ -456,6 +456,7 @@ class VoxelPostprocessor(BasePostprocessor):
             pred_box_tensor,
             gt_tensor,
             gt_temporal_recovered,
+            cav_box_tensor,
             pcd,
             save_path
         )

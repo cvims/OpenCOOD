@@ -94,6 +94,8 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
             object_stack = []
             object_id_stack = []
 
+            cav_object_stack = []
+
             # only for inference
             camera_lidar_transform = []
 
@@ -141,6 +143,9 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                         if not ego_range_vehicles[v_id]['opv2v_visible'] and selected_cav_base['params']['vehicles'][v_id]['opv2v_visible']:
                             ego_range_vehicles[v_id]['opv2v_visible'] = selected_cav_base['params']['vehicles'][v_id]['opv2v_visible']
 
+                cav_object_bbx_center = self.post_processor.generate_cav_object_center(selected_cav_base['params']['cav_vehicle'], ego_lidar_pose)
+                cav_object_stack.append(cav_object_bbx_center)
+
                 object_stack.append(selected_cav_processed['object_bbx_center'])
                 object_id_stack += selected_cav_processed['object_ids']
                 processed_features.append(
@@ -185,6 +190,8 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
             # for v_id in all_in_range_vehicles[-1]:
             #     if all_in_range_vehicles[-1][v_id]['opv2v_visible']:
             #         all_opv2v_visible_vehicles.append(v_id)
+
+            cav_object_stack = np.vstack(cav_object_stack)
 
             visible_vehicle_ids = list(set(temporal_gt_stack.keys()))
 
@@ -235,6 +242,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
             # prev_pose_offsets = np.stack(prev_pose_offsets)
 
             processed_data_dict['ego'].update({
+                'cav_bbx_center': cav_object_stack,
                 'object_bbx_center': object_bbx_center,
                 'object_bbx_mask': mask,
                 'object_ids': object_id_stack,
@@ -581,6 +589,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
             ego_pose = []
 
+            cav_bbx_center = []
             object_bbx_center = []
             object_bbx_mask = []
             object_ids = []
@@ -613,6 +622,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 ego_dict = batch[i][j]['ego']
                 ego_pose.append(ego_dict['ego_pose'])
 
+                cav_bbx_center.append(ego_dict['cav_bbx_center'])
                 object_bbx_center.append(ego_dict['object_bbx_center'])
                 object_bbx_mask.append(ego_dict['object_bbx_mask'])
                 object_ids.append(ego_dict['object_ids'])
@@ -638,6 +648,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                     origin_lidar.append(ego_dict['origin_lidar'])
 
             # convert to numpy, (B, max_num, 7)
+            cav_bbx_center = torch.from_numpy(np.array(cav_bbx_center))
             object_bbx_center = torch.from_numpy(np.array(object_bbx_center))
             object_bbx_mask = torch.from_numpy(np.array(object_bbx_mask))
 
@@ -665,18 +676,20 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
             # object id is only used during inference, where batch size is 1.
             # so here we only get the first element.
-            output_dict['ego'].update({'object_bbx_center': object_bbx_center,
-                                    'object_bbx_mask': object_bbx_mask,
-                                    'processed_lidar': processed_lidar_torch_dict,
-                                    'record_len': record_len,
-                                    'label_dict': label_torch_dict,
-                                    'object_ids': object_ids,
-                                    'object_detection_info_mapping': object_detection_info_mapping_list[-1],
-                                    'cav_ids': cav_ids,
-                                    'prior_encoding': prior_encoding,
-                                    'spatial_correction_matrix': spatial_correction_matrix_list,
-                                    'pairwise_t_matrix': pairwise_t_matrix,
-                                    'ego_pose': ego_pose[0]})
+            output_dict['ego'].update({
+                'cav_bbx_center': cav_bbx_center,
+                'object_bbx_center': object_bbx_center,
+                'object_bbx_mask': object_bbx_mask,
+                'processed_lidar': processed_lidar_torch_dict,
+                'record_len': record_len,
+                'label_dict': label_torch_dict,
+                'object_ids': object_ids,
+                'object_detection_info_mapping': object_detection_info_mapping_list[-1],
+                'cav_ids': cav_ids,
+                'prior_encoding': prior_encoding,
+                'spatial_correction_matrix': spatial_correction_matrix_list,
+                'pairwise_t_matrix': pairwise_t_matrix,
+                'ego_pose': ego_pose[0]})
 
             if self.visualize:
                 origin_lidar = \
@@ -745,6 +758,10 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         return pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids
 
 
+    def post_process_cav_vehicle(self, object_bbx_center, transformation_matrix):
+        return self.post_processor.generate_cav_bbx(object_bbx_center, transformation_matrix)
+
+
     def visualize_result(
             self,
             pred_box_tensor,
@@ -797,7 +814,7 @@ if __name__ == '__main__':
 
     dataset = TemporalLidarIntermediateFusionDataset(params, visualize=False, train=True, validate=False)
 
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=16)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
 
     for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
         pass

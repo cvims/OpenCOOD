@@ -136,6 +136,7 @@ class BaseTemporalDataset(BaseDataset):
 
             for v_id in data:
                 data[v_id]['params']['temporal_vehicles'] = self.scenario_database[scenario_index][v_id][timestamp_key]['yaml']['vehicles']
+                data[v_id]['params']['temporal_cav_vehicle'] = self.scenario_database[scenario_index][v_id][timestamp_key]['yaml']['cav_vehicle']
 
             data_queue.append(data)
         

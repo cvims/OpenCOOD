@@ -169,7 +169,9 @@ def main():
             gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
             gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
             # batch size = 1, -> batch_data[-1]...[-1]
-            cav_ids = batch_data[-1]['ego']['cav_ids'][-1]
+            cav_object_bbx_centers = batch_data[-1]['ego']['cav_bbx_center'][-1]
+            transformation_matrix = batch_data[-1]['ego']['transformation_matrix']
+            cav_gt_box_tensor = opencood_dataset.post_process_cav_vehicle(cav_object_bbx_centers, transformation_matrix)
 
             # non-temporal evaluation
             for criteria, result_stat_dict in result_stats.items():
@@ -286,7 +288,7 @@ def main():
                     pred_box_tensor,
                     gt_box_tensor,
                     gt_object_ids_criteria,
-                    cav_box_tensor,
+                    cav_gt_box_tensor,
                     batch_data[-1]['ego']['origin_lidar'],
                     save_path=vis_save_path
                 )

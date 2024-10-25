@@ -421,6 +421,7 @@ class BaseDataset(Dataset):
 
         # we always use current timestamp's gt bbx to gain a fair evaluation
         delay_params['vehicles'] = cur_params['vehicles']
+        delay_params['cav_vehicle'] = cur_params['cav_vehicle']
         delay_params['transformation_matrix'] = transformation_matrix
         delay_params['gt_transformation_matrix'] = \
             gt_transformation_matrix
@@ -477,8 +478,7 @@ class BaseDataset(Dataset):
         
         # check if ['params']['vehicles'].keys() of all entries are equal
         vehicle_ids = [list(data[cav_id]['params']['vehicles'].keys())[len(scenario_database.keys())-1:] for cav_id in data]
-        if not all([vehicle_ids[0] == vehicle_ids[i] for i in range(1, len(vehicle_ids))]):
-            print('debug')
+
         return data, scenario_index
 
     def retrieve_cav_data(self, cav_content, ego_cav_content, timestamp_key, timestamp_key_delay, cur_ego_pose_flag, load_lidar_data, load_camera_data):

@@ -325,7 +325,7 @@ def visualize_single_sample_output_gt(pred_tensor,
 
 
 def save_single_sample_output_gt_temporal(
-        pred_tensor, gt_tensor, gt_temporal_recovered_tensor, pcd, save_path='', mode='constant'):
+        pred_tensor, gt_tensor, gt_temporal_recovered_tensor, cav_box_tensor, pcd, save_path='', mode='constant'):
     if len(pcd.shape) == 3:
         pcd = pcd[0]
     origin_lidar = pcd
@@ -351,6 +351,7 @@ def save_single_sample_output_gt_temporal(
     oabbs_pred = bbx2oabb(pred_tensor, color=(1, 0, 0))
     oabbs_gt = bbx2oabb(gt_tensor, color=(0, 1, 0))
     oabbs_gt_temporal = bbx2oabb(gt_temporal_recovered_tensor, color=(0, 0, 1))
+    oabbs_gt_cav = bbx2oabb(cav_box_tensor, color=(0, 1, 1))
 
     # Convert oriented bounding boxes to picklable form
     def oabb_to_data(oabb):
@@ -362,13 +363,15 @@ def save_single_sample_output_gt_temporal(
     oabbs_pred_data = [oabb_to_data(oabb) for oabb in oabbs_pred]
     oabbs_gt_data = [oabb_to_data(oabb) for oabb in oabbs_gt]
     oabbs_gt_temporal_data = [oabb_to_data(oabb) for oabb in oabbs_gt_temporal]
+    oabbs_gt_cav_data = [oabb_to_data(oabb) for oabb in oabbs_gt_cav]
 
     # Create a picklable data structure with point cloud and bounding boxes
     visualize_elements_data = {
         'pcd': pcd_data,
         'oabbs_pred': oabbs_pred_data,
         'oabbs_gt': oabbs_gt_data,
-        'oabbs_gt_temporal': oabbs_gt_temporal_data
+        'oabbs_gt_temporal': oabbs_gt_temporal_data,
+        'oabbs_gt_cav': oabbs_gt_cav_data
     }
 
     # Save the data to a pickle file

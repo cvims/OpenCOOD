@@ -42,6 +42,30 @@ class BasePostprocessor(object):
     def generate_label(self, *argv):
         return None
 
+    def generate_cav_bbx(self, object_bbx_center, transformation_matrix):
+        """
+        Generate the bounding box of CAV.
+
+        Parameters
+        ----------
+        object_bbx_center : torch.Tensor
+            The center of bounding box, shape (N, 3).
+        transformation_matrix : torch.Tensor
+            The transformation matrix, shape (4, 4).
+
+        Returns
+        -------
+        cav_bbx : torch.Tensor
+            The bounding box of CAV, shape (N, 8, 3).
+        """
+        object_bbx_corner = \
+            box_utils.boxes_to_corners_3d(object_bbx_center,
+                                          self.params['order'])
+        cav_bbx = box_utils.project_box3d(object_bbx_corner.float(),
+                                          transformation_matrix)
+
+        return cav_bbx
+
     def generate_gt_bbx(self, data_dict):
         """
         The base postprocessor will generate 3d groundtruth bounding box.
@@ -59,8 +83,6 @@ class BasePostprocessor(object):
         gt_box3d_list = []
         # used to avoid repetitive bounding box
         object_id_list = []
-
-        object_detection_info_mapping = {}
 
         for cav_id, cav_content in data_dict.items():
             # used to project gt bounding box to ego space
@@ -159,3 +181,21 @@ class BasePostprocessor(object):
             object_ids.append(object_id)
 
         return object_np, mask, object_ids
+
+    def generate_cav_object_center(self, cav_vehicle, reference_lidar_pose):
+        from opencood.data_utils.datasets import GT_RANGE
+
+        output_dict = {}
+
+        box_utils.project_world_objects(cav_vehicle,
+                                        output_dict,
+                                        reference_lidar_pose,
+                                        GT_RANGE,
+                                        self.params['order'])
+
+        object_np = np.zeros((1, 7))
+
+        for i, (object_id, object_bbx) in enumerate(output_dict.items()):
+            object_np[i] = object_bbx[0, :]
+
+        return object_np
