@@ -61,18 +61,17 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         # first find the ego vehicle's lidar pose (scenario_samples[-1] because it is the last frame)
         for i, data_sample in enumerate(scenario_samples):
             for cav_id, ego_content in data_sample.items():
-                if i == len(scenario_samples)-1:
-                    if ego_content['ego']:
-                        ego_id = cav_id
-                        if prev_ego_id == -999:
-                            prev_ego_id = ego_id
-                        if ego_id != prev_ego_id:
-                            print('Attention: Ego vehicle changed in the same scenario.')
+                if ego_content['ego']:
+                    ego_id = cav_id
+                    if prev_ego_id == -999:
                         prev_ego_id = ego_id
-                        ego_lidar_pose = ego_content['params']['lidar_pose']
-                        ego_loc = ego_content['params']['true_ego_pos']
-                        ego_vehicles = ego_content['params']['vehicles']
-                        break
+                    if ego_id != prev_ego_id:
+                        print('Attention: Ego vehicle changed in the same scenario.')
+                    prev_ego_id = ego_id
+                    ego_lidar_pose = ego_content['params']['lidar_pose']
+                    ego_loc = ego_content['params']['true_ego_pos']
+                    ego_vehicles = ego_content['params']['vehicles']
+                    break
             assert cav_id == list(data_sample.keys())[
                 0], "The first element in the OrderedDict must be ego"
 
@@ -792,7 +791,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         """
         Save the point cloud with temporal information for visualization.
         """
-        self.post_processor.save_temporal_point_cloud(
+        return self.post_processor.save_temporal_point_cloud(
             pred_box_tensor,
             gt_box_tensor,
             gt_object_ids_criteria,

@@ -51,6 +51,10 @@ class BaseTemporalDataset(BaseDataset):
         else:
             self.timestamp_offset_mean = 0
             self.timestamp_offset_std = 0
+        
+        # all previous timestamps are with ego data only (no cooperation)
+        # only the current timestamp (last data point) has cooperation
+        self.temporal_ego_only = params['fusion']['args']['temporal_ego_only'] if 'temporal_ego_only' in params['fusion']['args'] else False
 
         super(BaseTemporalDataset, self).__init__(params, visualize, train, validate, **kwargs)
 

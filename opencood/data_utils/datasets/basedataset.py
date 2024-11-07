@@ -93,10 +93,6 @@ class BaseDataset(Dataset):
 
         self.sensor_cache_container = kwargs.get('sensor_cache_container', None)
 
-        # all previous timestamps are with ego data only (no cooperation)
-        # only the current timestamp (last data point) has cooperation
-        self.temporal_ego_only = params['fusion']['args']['temporal_ego_only'] if 'temporal_ego_only' in params['fusion']['args'] else False
-
         self.reinitialize()
 
     def reinitialize(self):

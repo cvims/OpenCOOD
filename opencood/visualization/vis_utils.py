@@ -103,6 +103,9 @@ def bbx2oabb(bbx_corner, order='hwl', color=(0, 0, 1)):
     oabbs = []
 
     for i in range(bbx_corner.shape[0]):
+        # check if bbx is consisting of zeros, continue
+        if np.all(bbx_corner[i] == 0):
+            continue
         bbx = bbx_corner[i]
         # o3d use right-hand coordinate
         bbx[:, :1] = - bbx[:, :1]
@@ -381,6 +384,8 @@ def save_single_sample_output_gt_temporal(
 
     with open(save_path, 'wb') as f:
         pkl.dump(visualize_elements_data, f)
+    
+    return visualize_elements_data
 
 
 def visualize_single_sample_output_bev(pred_box, gt_box, pcd, dataset,

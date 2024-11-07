@@ -452,7 +452,7 @@ class VoxelPostprocessor(BasePostprocessor):
         else:
             gt_temporal_recovered = None
 
-        vis_utils.save_single_sample_output_gt_temporal(
+        return vis_utils.save_single_sample_output_gt_temporal(
             pred_box_tensor,
             gt_tensor,
             gt_temporal_recovered,
