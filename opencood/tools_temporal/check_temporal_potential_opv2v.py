@@ -16,19 +16,23 @@ def inference_temporal_potential(dataset, batch):
     return gt_box_tensor, gt_object_ids
 
 
+def calculate_temporal_recovered(gt_object_ids_criteria):
+    # filter temporal recovered from gt_tensor
+    temporal_recovered_vehicles = []
+    for i, object_id in enumerate(gt_object_ids_criteria):
+        if gt_object_ids_criteria[object_id]['temporal_recovered']:
+            temporal_recovered_vehicles.append(i)
+    
+    return len(temporal_recovered_vehicles)
+
+
 def main():
     HYPES_YAML_FILE = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V/config.yaml'
     TEMPORAL_STEPS = 5
-
-    SAVE_PATH = os.path.join('visualization', 'temporal_potential', f'{TEMPORAL_STEPS}_steps')
-    COMBINED_FILE_NAME = 'output.pkl'
-
-    if not os.path.exists(SAVE_PATH):
-        os.makedirs(SAVE_PATH)
     
     hypes = yaml_utils.load_yaml(HYPES_YAML_FILE, None)
     hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
-    hypes['fusion']['args']['temporal_ego_only'] = False
+    hypes['fusion']['args']['temporal_ego_only'] = True
 
     print('Dataset Building')
     opencood_dataset = build_dataset(hypes, visualize=True, train=False)
@@ -37,7 +41,7 @@ def main():
     data_loader = DataLoader(
         opencood_dataset,
         batch_size=1,
-        num_workers=1,
+        num_workers=16,
         collate_fn=opencood_dataset.collate_batch_test,
         shuffle=False,
         pin_memory=False,
@@ -45,34 +49,29 @@ def main():
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    ALL_DATA = {}
+    len_records = opencood_dataset.len_record
+    scenario_temporal_recovered = dict()
 
     for i, batch_data in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_data = train_utils.to_device(batch_data, device)
 
-        gt_box_tensor, gt_object_ids = inference_temporal_potential(opencood_dataset, batch_data[-1])
+        _, gt_object_ids = inference_temporal_potential(opencood_dataset, batch_data[-1])
 
         gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
         gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
-        cav_object_bbx_centers = batch_data[-1]['ego']['cav_bbx_center'][-1]
-        transformation_matrix = batch_data[-1]['ego']['transformation_matrix']
-        cav_gt_box_tensor = opencood_dataset.post_process_cav_vehicle(cav_object_bbx_centers, transformation_matrix)
 
-        save_path = os.path.join(SAVE_PATH, f'{i:05d}')
+        for j, len_record in enumerate(len_records):
+            if i <= len_record:
+                if j in scenario_temporal_recovered:
+                    scenario_temporal_recovered[j] += calculate_temporal_recovered(gt_object_ids_criteria)
+                else:
+                    scenario_temporal_recovered[j] = calculate_temporal_recovered(gt_object_ids_criteria)
 
-        pkl_element = opencood_dataset.save_temporal_point_cloud(
-            None,
-            gt_box_tensor,
-            gt_object_ids_criteria,
-            cav_gt_box_tensor,
-            batch_data[-1]['ego']['origin_lidar'],
-            save_path=save_path
-        )
-
-        ALL_DATA[i] = pkl_element
+                break
     
-    with open(os.path.join(SAVE_PATH, COMBINED_FILE_NAME), 'wb') as f:
-        pkl.dump(ALL_DATA, f)
+    print(scenario_temporal_recovered)
+    # sum of all
+    print('Total Temporal Recovered:', sum(scenario_temporal_recovered.values()))
 
 
 if __name__ == '__main__':

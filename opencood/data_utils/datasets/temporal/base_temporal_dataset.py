@@ -88,14 +88,15 @@ class BaseTemporalDataset(BaseDataset):
             timestamp_index_delay = max(0, timestamp_index - timestamp_delay)
             timestamp_key_delay = self.return_timestamp_key(scenario_database, timestamp_index_delay)
 
-            # check if CAV has data for the timestamp (otherwise it is possibly out of communication range)
-            if timestamp_key not in cav_content:
-                continue
-
             # Retrieve and structure CAV data
-            data[cav_id] = self.retrieve_cav_data(
+            cav_data = self.retrieve_cav_data(
                 cav_content, ego_cav_content, cur_timestamp_key, timestamp_key_delay, cur_ego_pose_flag, load_lidar_data, load_camera_data
             )
+
+            if cav_data is None:
+                continue
+        
+            data[cav_id] = cav_data
 
             # Store timestamp-related data
             data[cav_id]['timestamp_key'] = timestamp_key

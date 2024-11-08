@@ -440,11 +440,14 @@ class VoxelPostprocessor(BasePostprocessor):
                 temporal_recovered_cavs.append(i)
             
         gt_temporal_recovered = []
+        removed = 0
         if temporal_recovered_cavs:
             for i in temporal_recovered_cavs:
+                i -= removed
                 gt_temporal_recovered.append(gt_tensor[i])
                 # remove the temporal recovered cavs from gt_tensor (tensor)
                 gt_tensor = torch.cat([gt_tensor[:i], gt_tensor[i+1:]], dim=0)
+                removed += 1
 
         if gt_temporal_recovered:
             # shape (N, 8, 3)

@@ -66,7 +66,7 @@ def create_result_stat_dict():
 
 
 def main():
-    SAVE_VIS = True
+    SAVE_VIS = False
     VIS_SAVE_PATH = os.path.join('visualization', 'inference', 'scope')
 
     opt = test_parser()
@@ -87,6 +87,8 @@ def main():
         hypes['wild_setting']['xyz_std'] = opt.xyz_std
     if opt.ryp_std is not None:
         hypes['wild_setting']['ryp_std'] = opt.ryp_std
+    
+    # hypes['fusion']['args']['queue_length'] = 3
 
     print('Dataset Building')
     opencood_dataset = build_dataset(hypes, visualize=True, train=False)

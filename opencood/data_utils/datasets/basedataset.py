@@ -19,6 +19,12 @@ from opencood.utils.temporal_utils import categorize_by_kitti_criteria, KITTI_DE
 
 class BaseDataset(Dataset):
     def __init__(self, params: dict, visualize: bool, train=True, validate=False, **kwargs):
+        # For fast testing
+        if 'use_scenarios_idx' in kwargs:
+            self.use_scenarios_idx = kwargs['use_scenarios_idx']
+        else:
+            self.use_scenarios_idx = []
+
         self.params = params
         self.visualize = visualize
         self.train = train
@@ -73,11 +79,14 @@ class BaseDataset(Dataset):
             self.max_cav = 7
         else:
             self.max_cav = params['train_params']['max_cav']
-        
+
         self.all_yamls = pickle.load(open(os.path.join(self.root_dir, 'additional', 'yamls.pkl'), 'rb'))
 
         # init scenario folders
         self.scenario_folders = sorted(list(self.all_yamls.keys()))
+
+        if self.use_scenarios_idx:
+            self.scenario_folders = [self.scenario_folders[i] for i in range(len(self.scenario_folders)) if i in self.use_scenarios_idx]
 
         # detection_criteria = params['detection_criteria']
         # self.camera_detection_criteria = detection_criteria['camera']
@@ -462,9 +471,14 @@ class BaseDataset(Dataset):
                 continue
 
             # Retrieve and structure CAV data
-            data[cav_id] = self.retrieve_cav_data(
+            cav_data = self.retrieve_cav_data(
                 cav_content, ego_cav_content, timestamp_key, timestamp_key_delay, cur_ego_pose_flag, load_lidar_data, load_camera_data
             )
+            
+            if cav_data is None:
+                continue
+
+            data[cav_id] = cav_data
 
             # Store timestamp-related data
             data[cav_id]['timestamp_key'] = timestamp_key
@@ -481,6 +495,9 @@ class BaseDataset(Dataset):
         """
         Helper function to retrieve and structure CAV data for a given timestamp.
         """
+        if timestamp_key_delay not in cav_content or timestamp_key not in cav_content:
+            return None
+
         cav_data = OrderedDict()
         cav_data['ego'] = cav_content['ego']
         cav_data['params'] = self.reform_param(cav_content, ego_cav_content, timestamp_key, timestamp_key_delay, cur_ego_pose_flag)

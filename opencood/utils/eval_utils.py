@@ -38,6 +38,27 @@ def voc_ap(rec, prec):
     return ap, mrec, mpre
 
 
+def calculate_temporal_recovered_hits(det_boxes, det_score, gt_boxes, result_stat, iou_thresh, gt_object_ids_criteria):
+    # match detection and groundtruth bounding box by Hungarian algorithm
+    matched_pairs_indices = match_gt_det_hungarian(det_boxes, gt_boxes, iou_thresh)
+    unmatched_detections_indices = set(range(det_boxes.shape[0])) - set([pair[0] for pair in matched_pairs_indices])
+    unmatched_gt_indices = set(range(gt_boxes.shape[0])) - set([pair[1] for pair in matched_pairs_indices])
+
+    filter_gts_idx = {i for i, gt_idx in enumerate(gt_object_ids_criteria) if gt_object_ids_criteria[gt_idx]['temporal_recovered']}
+
+    if len(filter_gts_idx) == 0:
+        return
+    
+    matched_pairs_indices = [(det_idx, gt_idx) for det_idx, gt_idx in matched_pairs_indices if gt_idx in filter_gts_idx]
+    unmatched_gt_indices = {gt_idx for gt_idx in unmatched_gt_indices if gt_idx in filter_gts_idx}
+
+    hits = len(matched_pairs_indices)
+    no_hits = len(unmatched_gt_indices)
+
+    result_stat[iou_thresh]['hits'] += hits
+    result_stat[iou_thresh]['no_hits'] += no_hits
+
+
 def calculate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh):
     """
     Calculate the true positive and false positive numbers of the current

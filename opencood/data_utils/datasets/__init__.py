@@ -26,7 +26,7 @@ __all__ = {
 }
 
 
-def build_dataset(dataset_cfg, visualize=False, train=True):
+def build_dataset(dataset_cfg, visualize=False, train=True, **kwargs):
     dataset_name = dataset_cfg['fusion']['core_method']
     error_message = f"{dataset_name} is not found. " \
                     f"Please add your processor file's name in opencood/" \
@@ -41,7 +41,8 @@ def build_dataset(dataset_cfg, visualize=False, train=True):
     dataset = __all__[dataset_name](
         params=dataset_cfg,
         visualize=visualize,
-        train=train
+        train=train,
+        **kwargs
     )
 
     return dataset

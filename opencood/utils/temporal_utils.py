@@ -254,13 +254,14 @@ def update_temporal_vehicles_list(all_in_range_vehicles_list: list, temporal_veh
         prev_frame_ids = list(prev_frame.keys())
 
         for v_id in prev_frame_ids:
-            if v_id not in current_frame_ids: # and v_id in all_in_range_vehicles_list[i]:
-                # add the vehicle to the current frame if it was visible in the previous frame (with the coordinates of the current frame)
-                current_frame[v_id] = all_in_range_vehicles_list[i][v_id]
-                # Preserve the visibility data from the previous frame
-                current_frame[v_id]['kitti_criteria'] = prev_frame[v_id].get('kitti_criteria')
-                current_frame[v_id]['temporal_kitti_criteria'] = prev_frame[v_id].get('temporal_kitti_criteria')
-                current_frame[v_id]['temporal_recovered'] = True
+            if v_id not in current_frame_ids:
+                if v_id in all_in_range_vehicles_list[i]:
+                    # add the vehicle to the current frame if it was visible in the previous frame (with the coordinates of the current frame)
+                    current_frame[v_id] = all_in_range_vehicles_list[i][v_id]
+                    # Preserve the visibility data from the previous frame
+                    current_frame[v_id]['kitti_criteria'] = prev_frame[v_id].get('kitti_criteria')
+                    current_frame[v_id]['temporal_kitti_criteria'] = prev_frame[v_id].get('temporal_kitti_criteria')
+                    current_frame[v_id]['temporal_recovered'] = True
             else:
                 current_frame[v_id]['temporal_recovered'] = False
                 # choose the lowest the criteria across the temporal stream
