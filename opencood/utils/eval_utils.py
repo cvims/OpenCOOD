@@ -4,12 +4,28 @@
 
 
 import os
+import random
 import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment
 
 from opencood.utils import common_utils, box_utils, camera_utils, temporal_utils, transformation_utils
 from opencood.hypes_yaml import yaml_utils
+
+
+def set_random_seed(seed):
+    """
+    Set the random seed.
+
+    Parameters
+    ----------
+    seed : int
+        The random seed.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def voc_ap(rec, prec):
@@ -470,7 +486,7 @@ def calculate_ap(result_stat, iou, global_sort_detections):
     return ap, mrec, mprec
 
 
-def eval_final_results(result_stat, save_path, global_sort_detections):
+def eval_final_results(result_stat, save_path=None, global_sort_detections=None):
     dump_dict = {}
 
     ap_30, mrec_30, mpre_30 = calculate_ap(result_stat, 0.30, global_sort_detections)
@@ -487,7 +503,9 @@ def eval_final_results(result_stat, save_path, global_sort_detections):
                       })
     
     output_file = 'eval.yaml' if not global_sort_detections else 'eval_global_sort.yaml'
-    yaml_utils.save_yaml(dump_dict, os.path.join(save_path, output_file))
+
+    if save_path:
+        yaml_utils.save_yaml(dump_dict, os.path.join(save_path, output_file))
 
     print('The Average Precision at IOU 0.3 is %.2f, '
           'The Average Precision at IOU 0.5 is %.2f, '

@@ -3,6 +3,7 @@ Basedataset class for lidar data pre-processing
 """
 from collections import OrderedDict
 import numpy as np
+import random
 
 from opencood.utils.pcd_utils import pcd_to_np
 from opencood.utils.camera_utils import load_rgb_from_files
@@ -56,8 +57,43 @@ class BaseTemporalDataset(BaseDataset):
         # only the current timestamp (last data point) has cooperation
         self.temporal_ego_only = params['fusion']['args']['temporal_ego_only'] if 'temporal_ego_only' in params['fusion']['args'] else False
 
+        # CAV communication dropout
+        self.comm_dropout = params['fusion']['args']['communication_dropout'] if 'communication_dropout' in params['fusion']['args'] else 0
+
         super(BaseTemporalDataset, self).__init__(params, visualize, train, validate, **kwargs)
 
+        self._apply_communication_dropout()
+
+
+    def _apply_communication_dropout(self):
+        """
+        We delete/drop the CAVs immediately before we use them.
+        This ensures that historical frames have the same CAVs especially important for evaluation.
+        """
+        if self.comm_dropout <= 0:
+            return
+
+        # first CAV (dict entry) is the ego vehicle
+        for scenario_id in self.scenario_database:
+            # ego is first (we never drop the ego)
+            cav_ids = list(self.scenario_database[scenario_id].keys())[1:]
+            # randomly drop depending on the comm_dropout percentage
+            for cav_id in cav_ids:
+                # timestamps
+                timestamp_to_del = []
+                for timestamp_key in self.scenario_database[scenario_id][cav_id]:
+                    if timestamp_key == 'ego':
+                        continue
+                    if random.random() < self.comm_dropout:
+                        timestamp_to_del.append(timestamp_key)
+                # delete the timestamps
+                for timestamp_key in timestamp_to_del:
+                    del self.scenario_database[scenario_id][cav_id][timestamp_key]
+
+        
+    def reinitialize(self):
+        super().reinitialize()
+        self._apply_communication_dropout()
 
     def __len__(self):
         return self.len_record[-1]
@@ -87,6 +123,21 @@ class BaseTemporalDataset(BaseDataset):
             timestamp_delay = self.time_delay_calculation(cav_content['ego'])
             timestamp_index_delay = max(0, timestamp_index - timestamp_delay)
             timestamp_key_delay = self.return_timestamp_key(scenario_database, timestamp_index_delay)
+          
+            # we try to get the current timestamp for transformation matrix calculation
+            # but if it does not exist, we try to get the latest timestamp possible
+            if cur_timestamp_key not in cav_content:
+                int_key_delay = int(timestamp_key_delay)
+                latest_timestamp_key = int(cur_timestamp_key) -2  # 2 is the timestamp step size
+                # all between latest and timestamp_key_delay (format to 6 digits with leading zeros)
+                possible_timestamps = [f'{i:06d}' for i in range(latest_timestamp_key, int_key_delay, -2)]
+                # check if the timestamps are available
+                possible_timestamps = [pt for pt in possible_timestamps if pt in cav_content]
+
+                if len(possible_timestamps) == 0:
+                    cur_timestamp_key = timestamp_key_delay
+                else:
+                    cur_timestamp_key = possible_timestamps[-1]
 
             # Retrieve and structure CAV data
             cav_data = self.retrieve_cav_data(

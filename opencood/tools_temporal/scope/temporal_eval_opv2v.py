@@ -16,6 +16,13 @@ from opencood.utils import eval_utils
 
 
 def create_result_stat_dict():
+    result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0, 'score': []},
+                   0.5: {'tp': [], 'fp': [], 'gt': 0, 'score': []},
+                   0.7: {'tp': [], 'fp': [], 'gt': 0, 'score': []}}
+    return result_stat
+
+
+def create_temporal_result_stat_dict():
     result_stat = {0.3: {'hits': 0, 'no_hits': 0},
                    0.5: {'hits': 0, 'no_hits': 0},
                    0.7: {'hits': 0, 'no_hits': 0}}
@@ -25,6 +32,9 @@ def create_result_stat_dict():
 def main():
     MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
     HYPES_YAML_FILE = os.path.join(MODEL_DIR, 'config.yaml')
+
+    # STANDARD SCOPE SETTING: Temporal steps = 2; Temporal ego only: True
+
     TEMPORAL_STEPS = 2
     
     hypes = yaml_utils.load_yaml(HYPES_YAML_FILE, None)
@@ -49,7 +59,7 @@ def main():
     data_loader = DataLoader(
         opencood_dataset,
         batch_size=1,
-        num_workers=16,
+        num_workers=1,
         collate_fn=opencood_dataset.collate_batch_test,
         shuffle=False,
         pin_memory=False,
@@ -66,7 +76,8 @@ def main():
     _, model = train_utils.load_saved_model(MODEL_DIR, model)
     model.eval()
 
-    temporal_result_stats = create_result_stat_dict()
+    standard_result_stats = create_result_stat_dict()
+    temporal_result_stats = create_temporal_result_stat_dict()
 
     for i, batch_data in tqdm(enumerate(data_loader), total=len(data_loader)):
         with torch.no_grad():
@@ -81,6 +92,16 @@ def main():
             gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
             gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
 
+            # standard evaluation
+            for iou_thre in [0.3, 0.5, 0.7]:
+                eval_utils.calculate_tp_fp(
+                    pred_box_tensor,
+                    pred_score,
+                    gt_box_tensor,
+                    standard_result_stats,
+                    iou_thre)
+
+            # temporal evaluation
             for iou_thre in [0.3, 0.5, 0.7]:
                 eval_utils.calculate_temporal_recovered_hits(
                     pred_box_tensor,
@@ -90,8 +111,9 @@ def main():
                     iou_thre,
                     gt_object_ids_criteria)
     
-    print(temporal_result_stats)
 
+    eval_utils.eval_final_results(standard_result_stats, None, None)
+    print('Temporal Evaluation:', temporal_result_stats)
 
 if __name__ == '__main__':
     main()

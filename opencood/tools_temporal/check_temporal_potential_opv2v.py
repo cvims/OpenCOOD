@@ -5,6 +5,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from opencood.tools import train_utils
+from opencood.utils.eval_utils import set_random_seed
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.data_utils.datasets import build_dataset
 import pickle as pkl
@@ -27,15 +28,27 @@ def calculate_temporal_recovered(gt_object_ids_criteria):
 
 
 def main():
+    set_random_seed(0)
+
     HYPES_YAML_FILE = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V/config.yaml'
-    TEMPORAL_STEPS = 5
+    TEMPORAL_STEPS = 4
+
+    SPLIT = 'train'  # 'train', 'validate', 'test'
+
+    DATASET_PATH = "/data/public_datasets/OPV2V/original"
     
     hypes = yaml_utils.load_yaml(HYPES_YAML_FILE, None)
+    hypes['root_dir'] = os.path.join(DATASET_PATH, SPLIT)
+    hypes['validate_dir'] = os.path.join(DATASET_PATH, SPLIT)
     hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
-    hypes['fusion']['args']['temporal_ego_only'] = True
+    hypes['fusion']['args']['temporal_ego_only'] = False
+    hypes['fusion']['args']['communication_dropout'] = 0.25
 
     print('Dataset Building')
-    opencood_dataset = build_dataset(hypes, visualize=True, train=False)
+    opencood_dataset = build_dataset(
+        hypes, visualize=True, train=False,
+        use_scenarios_idx=[0],
+    )
     print(f"{len(opencood_dataset)} samples found.")
 
     data_loader = DataLoader(
@@ -66,7 +79,6 @@ def main():
                     scenario_temporal_recovered[j] += calculate_temporal_recovered(gt_object_ids_criteria)
                 else:
                     scenario_temporal_recovered[j] = calculate_temporal_recovered(gt_object_ids_criteria)
-
                 break
     
     print(scenario_temporal_recovered)

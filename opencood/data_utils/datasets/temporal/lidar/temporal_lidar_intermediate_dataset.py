@@ -135,6 +135,8 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                             continue
                         # Update KITTI criteria for cooperative perception
                         # CAVs can have easier visibility criteria than ego
+                        if cav_id not in selected_cav_base['params']['vehicles']:
+                            continue
                         updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['params']['vehicles'][v_id], self.kitti_detection_criteria)
                         ego_range_vehicles[v_id]['kitti_criteria'] = updated_kitti_criteria['kitti_criteria']
                         ego_range_vehicles[v_id]['kitti_criteria_props'] = updated_kitti_criteria['kitti_criteria_props']
