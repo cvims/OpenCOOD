@@ -648,7 +648,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 if self.visualize:
                     origin_lidar.append(ego_dict['origin_lidar'])
 
-            # convert to numpy, (B, max_num, 7)
+            # convert to numpy, (B, max_num, 7) # dtype float32
             cav_bbx_center = torch.from_numpy(np.array(cav_bbx_center))
             object_bbx_center = torch.from_numpy(np.array(object_bbx_center))
             object_bbx_mask = torch.from_numpy(np.array(object_bbx_mask))

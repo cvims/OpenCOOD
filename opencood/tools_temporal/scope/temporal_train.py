@@ -30,20 +30,22 @@ def create_temporal_result_stat_dict():
 def main():
     eval_utils.set_random_seed(0)
 
-    MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
-    HYPES_YAML = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/temporal/scope_temporal_4_steps.yaml'
+    # MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
+    MODEL_DIR = None
+    HYPES_YAML = r'/home/roessle/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/temporal/scope_temporal_4_steps.yaml'
     HALF_PRECISION = False
-    EPOCHS = 10
+    EPOCHS = 40
 
-    RUN_PATH = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/runs'
+    RUN_PATH = r'/home/roessle/Git_Repos/Private/OpenCOOD/opencood/runs'
     # add timestamp (year, month, day, hour, minute) to the path
     # RUN_PATH = os.path.join(RUN_PATH, 'temporal', 'scope', time.strftime('%Y%m%d%H%M'))
     # os.makedirs(RUN_PATH, exist_ok=False)
 
     # scenarios with more than 50 temporal potential vehicles (temporal steps = 4; communication dropout = 0.25)
-    train_scenario_idx = [
-        0, 5, 22, 24, 35, 40, 41, 42
-    ]
+    # train_scenario_idx = [
+    #     0, 5, 22, 24, 35, 40, 41, 42
+    # ]
+    train_scenario_idx = None
 
     hypes = yaml_utils.load_yaml(HYPES_YAML, None)
     # Manually set the number of epochs
@@ -59,14 +61,14 @@ def main():
 
     train_loader = DataLoader(opencood_train_dataset,
                                 batch_size=hypes['train_params']['batch_size'],
-                                num_workers=1,
-                                collate_fn=opencood_train_dataset.collate_batch_test,
+                                num_workers=16,
+                                collate_fn=opencood_train_dataset.collate_batch,
                                 shuffle=True,
                                 pin_memory=False,
                                 drop_last=True)
     val_loader = DataLoader(opencood_validate_dataset,
-                            batch_size=hypes['train_params']['batch_size'],
-                            num_workers=1,
+                            batch_size=1,
+                            num_workers=16,
                             collate_fn=opencood_train_dataset.collate_batch_test,
                             shuffle=False,
                             pin_memory=False,
@@ -101,7 +103,7 @@ def main():
     scheduler = train_utils.setup_lr_schedular(hypes, optimizer, num_steps)
 
     # record training
-    # writer = SummaryWriter(RUN_PATH)
+    writer = SummaryWriter(RUN_PATH)
 
     # half precision training
     if HALF_PRECISION:
@@ -130,21 +132,21 @@ def main():
             batch_data_list = train_utils.to_device(batch_data_list, device)
             batch_data = train_utils.to_device(batch_data, device)
 
-            _, gt_object_ids = opencood_train_dataset.post_processor.generate_gt_bbx(batch_data)
-            gt_object_ids_criteria = batch_data['ego']['object_detection_info_mapping']
-            gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
+            # _, gt_object_ids = opencood_train_dataset.post_processor.generate_gt_bbx(batch_data)
+            # gt_object_ids_criteria = batch_data['ego']['object_detection_info_mapping']
+            # gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
 
             if not HALF_PRECISION:
                 output_dict = model(batch_data_list)
                 # first argument is always your output dictionary,
                 # second argument is always your label dictionary.
                 final_loss = criterion(
-                    output_dict, batch_data['ego']['label_dict'], gt_object_ids_criteria)
+                    output_dict, batch_data['ego']['label_dict'], None)
             else:
                 with torch.cuda.amp.autocast():
                     output_dict = model(batch_data['ego'])
                     final_loss = criterion(
-                        output_dict, batch_data['ego']['label_dict'], gt_object_ids_criteria)
+                        output_dict, batch_data['ego']['label_dict'], None)
 
             criterion.logging(epoch, i, len(train_loader), writer, pbar=pbar_train)
             pbar_train.update(1)
@@ -187,6 +189,7 @@ def main():
                     pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids = \
                     opencood_validate_dataset.post_process(batch_data, {'ego': output_dict})
 
+                    _, gt_object_ids = opencood_train_dataset.post_processor.generate_gt_bbx(batch_data)
                     gt_object_ids_criteria = batch_data['ego']['object_detection_info_mapping']
                     gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
 
