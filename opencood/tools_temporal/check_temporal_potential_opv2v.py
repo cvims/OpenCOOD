@@ -31,7 +31,7 @@ def main():
     set_random_seed(0)
 
     HYPES_YAML_FILE = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V/config.yaml'
-    TEMPORAL_STEPS = 4
+    TEMPORAL_STEPS = 2
 
     SPLIT = 'train'  # 'train', 'validate', 'test'
 
@@ -42,7 +42,7 @@ def main():
     hypes['validate_dir'] = os.path.join(DATASET_PATH, SPLIT)
     hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
     hypes['fusion']['args']['temporal_ego_only'] = False
-    hypes['fusion']['args']['communication_dropout'] = 0.25
+    hypes['fusion']['args']['communication_dropout'] = 0.5
 
     print('Dataset Building')
     opencood_dataset = build_dataset(
@@ -54,7 +54,7 @@ def main():
     data_loader = DataLoader(
         opencood_dataset,
         batch_size=1,
-        num_workers=16,
+        num_workers=1,
         collate_fn=opencood_dataset.collate_batch_test,
         shuffle=False,
         pin_memory=False,

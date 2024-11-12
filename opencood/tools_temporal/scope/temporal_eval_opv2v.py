@@ -30,16 +30,19 @@ def create_temporal_result_stat_dict():
 
 
 def main():
+    eval_utils.set_random_seed(0)
     MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
     HYPES_YAML_FILE = os.path.join(MODEL_DIR, 'config.yaml')
 
+    MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/runs/temporal/scope/202411121030'
+
     # STANDARD SCOPE SETTING: Temporal steps = 2; Temporal ego only: True
 
-    TEMPORAL_STEPS = 2
+    TEMPORAL_STEPS = 4
     
     hypes = yaml_utils.load_yaml(HYPES_YAML_FILE, None)
     hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
-    hypes['fusion']['args']['temporal_ego_only'] = True
+    hypes['fusion']['args']['temporal_ego_only'] = False
 
     hypes['model']['args']['fusion_args']['communication']['thre'] = 0
     hypes['postprocess']['target_args']['score_threshold'] = 0.23

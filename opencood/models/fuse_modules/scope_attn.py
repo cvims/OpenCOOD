@@ -121,7 +121,7 @@ class SCOPE(nn.Module):
                     node_features = batch_node_features[b]
                     C, H, W = node_features.shape[1:]
                     neighbor_feature = warp_affine_simple(node_features,
-                                                    t_matrix[0, :, :, :],
+                                                    t_matrix[0, :node_features.shape[0], :, :],
                                                     (H, W))
                     if self.agg_mode == "Deform":
                         feature_shape = neighbor_feature.shape
