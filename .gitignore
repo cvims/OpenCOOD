@@ -1,3 +1,4 @@
+*.sh
 .vscode
 model_weights
 runs
