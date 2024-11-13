@@ -24,6 +24,7 @@ def test_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
     parser.add_argument('--model_dir', type=str,
                         default=r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V',
+                        # default=r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/scope/point_pillar_scope_more_steps_all_cavs_2024_11_12_19_54_32',
                         required=False,
                         help='Continued training path')
     parser.add_argument('--fusion_method',
@@ -95,7 +96,7 @@ def main():
     print(f"{len(opencood_dataset)} samples found.")
     data_loader = DataLoader(opencood_dataset,
                              batch_size=1,
-                             num_workers=1,
+                             num_workers=16,
                              collate_fn=opencood_dataset.collate_batch_test,
                              shuffle=False,
                              pin_memory=False,

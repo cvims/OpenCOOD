@@ -34,11 +34,12 @@ def main():
     MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
     HYPES_YAML_FILE = os.path.join(MODEL_DIR, 'config.yaml')
 
-    MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/runs/temporal/scope/202411121030'
+    # MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/scope/point_pillar_scope_more_steps_all_cavs_2024_11_12_19_54_32'
+    # HYPES_YAML_FILE = os.path.join(MODEL_DIR, 'config.yaml')
 
     # STANDARD SCOPE SETTING: Temporal steps = 2; Temporal ego only: True
 
-    TEMPORAL_STEPS = 4
+    TEMPORAL_STEPS = 2
     
     hypes = yaml_utils.load_yaml(HYPES_YAML_FILE, None)
     hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
@@ -62,7 +63,7 @@ def main():
     data_loader = DataLoader(
         opencood_dataset,
         batch_size=1,
-        num_workers=1,
+        num_workers=16,
         collate_fn=opencood_dataset.collate_batch_test,
         shuffle=False,
         pin_memory=False,

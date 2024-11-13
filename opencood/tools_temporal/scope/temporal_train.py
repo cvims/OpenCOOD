@@ -32,11 +32,11 @@ def main():
 
     # MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
     MODEL_DIR = None
-    HYPES_YAML = r'/home/roessle/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/temporal/scope_temporal_4_steps.yaml'
+    HYPES_YAML = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/temporal/scope_temporal_4_steps.yaml'
     HALF_PRECISION = False
     EPOCHS = 40
 
-    RUN_PATH = r'/home/roessle/Git_Repos/Private/OpenCOOD/opencood/runs'
+    RUN_PATH = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/runs'
     # add timestamp (year, month, day, hour, minute) to the path
     RUN_PATH = os.path.join(RUN_PATH, 'temporal', 'scope', time.strftime('%Y%m%d%H%M'))
     os.makedirs(RUN_PATH, exist_ok=False)
@@ -45,7 +45,7 @@ def main():
     # train_scenario_idx = [
     #     0, 5, 22, 24, 35, 40, 41, 42
     # ]
-    train_scenario_idx = None
+    train_scenario_idx = [0]
 
     hypes = yaml_utils.load_yaml(HYPES_YAML, None)
     # Manually set the number of epochs
@@ -141,12 +141,16 @@ def main():
                 # first argument is always your output dictionary,
                 # second argument is always your label dictionary.
                 final_loss = criterion(
-                    output_dict, batch_data['ego']['label_dict'], None)
+                    output_dict,
+                    batch_data['ego']['label_dict'],
+                    batch_data['ego']['temporal_label_dict'])
             else:
                 with torch.cuda.amp.autocast():
                     output_dict = model(batch_data['ego'])
                     final_loss = criterion(
-                        output_dict, batch_data['ego']['label_dict'], None)
+                        output_dict,
+                        batch_data['ego']['label_dict'],
+                        batch_data['ego']['temporal_label_dict'])
 
             criterion.logging(epoch, i, len(train_loader), writer, pbar=pbar_train)
             pbar_train.update(1)
@@ -181,8 +185,10 @@ def main():
                     batch_data = train_utils.to_device(batch_data, device)
                     output_dict = model(batch_data_list)
 
-                    final_loss = criterion(output_dict,
-                                           batch_data['ego']['label_dict'], None)
+                    final_loss = criterion(
+                        output_dict,
+                        batch_data['ego']['label_dict'],
+                        batch_data['ego']['temporal_label_dict'])
                     valid_ave_loss.append(final_loss.item())
 
                     # temporal evaluation
