@@ -623,7 +623,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 ego_dict = batch[i][j]['ego']
                 ego_pose.append(ego_dict['ego_pose'])
 
-                cav_bbx_center.append(ego_dict['cav_bbx_center'])
+                # cav_bbx_center.append(ego_dict['cav_bbx_center'])
                 object_bbx_center.append(ego_dict['object_bbx_center'])
                 object_bbx_mask.append(ego_dict['object_bbx_mask'])
                 object_ids.append(ego_dict['object_ids'])
@@ -648,8 +648,8 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 if self.visualize:
                     origin_lidar.append(ego_dict['origin_lidar'])
 
-            # convert to numpy, (B, max_num, 7) # dtype float32
-            cav_bbx_center = torch.from_numpy(np.array(cav_bbx_center))
+            # convert to numpy, (B, max_num, 7)
+            # cav_bbx_center = torch.from_numpy(np.array(cav_bbx_center))
             object_bbx_center = torch.from_numpy(np.array(object_bbx_center))
             object_bbx_mask = torch.from_numpy(np.array(object_bbx_mask))
 
@@ -678,7 +678,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
             # object id is only used during inference, where batch size is 1.
             # so here we only get the first element.
             output_dict['ego'].update({
-                'cav_bbx_center': cav_bbx_center,
+                # 'cav_bbx_center': cav_bbx_center,
                 'object_bbx_center': object_bbx_center,
                 'object_bbx_mask': object_bbx_mask,
                 'processed_lidar': processed_lidar_torch_dict,

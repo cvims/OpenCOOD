@@ -38,8 +38,8 @@ def main():
 
     RUN_PATH = r'/home/roessle/Git_Repos/Private/OpenCOOD/opencood/runs'
     # add timestamp (year, month, day, hour, minute) to the path
-    # RUN_PATH = os.path.join(RUN_PATH, 'temporal', 'scope', time.strftime('%Y%m%d%H%M'))
-    # os.makedirs(RUN_PATH, exist_ok=False)
+    RUN_PATH = os.path.join(RUN_PATH, 'temporal', 'scope', time.strftime('%Y%m%d%H%M'))
+    os.makedirs(RUN_PATH, exist_ok=False)
 
     # scenarios with more than 50 temporal potential vehicles (temporal steps = 4; communication dropout = 0.25)
     # train_scenario_idx = [
@@ -182,7 +182,7 @@ def main():
                     output_dict = model(batch_data_list)
 
                     final_loss = criterion(output_dict,
-                                           batch_data['ego']['label_dict'])
+                                           batch_data['ego']['label_dict'], None)
                     valid_ave_loss.append(final_loss.item())
 
                     # temporal evaluation
