@@ -36,16 +36,11 @@ def main():
     HALF_PRECISION = False
     EPOCHS = 40
 
-    RUN_PATH = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/runs'
-    # add timestamp (year, month, day, hour, minute) to the path
-    RUN_PATH = os.path.join(RUN_PATH, 'temporal', 'scope', time.strftime('%Y%m%d%H%M'))
-    os.makedirs(RUN_PATH, exist_ok=False)
-
     # scenarios with more than 50 temporal potential vehicles (temporal steps = 4; communication dropout = 0.25)
     # train_scenario_idx = [
     #     0, 5, 22, 24, 35, 40, 41, 42
     # ]
-    train_scenario_idx = [0]
+    train_scenario_idx = None
 
     hypes = yaml_utils.load_yaml(HYPES_YAML, None)
     # Manually set the number of epochs
@@ -103,7 +98,7 @@ def main():
     scheduler = train_utils.setup_lr_schedular(hypes, optimizer, num_steps)
 
     # record training
-    writer = SummaryWriter(RUN_PATH)
+    writer = SummaryWriter(saved_path)
 
     # half precision training
     if HALF_PRECISION:
@@ -168,7 +163,7 @@ def main():
 
         if epoch % hypes['train_params']['save_freq'] == 0:
             torch.save(model_without_ddp.state_dict(),
-                os.path.join(RUN_PATH, 'net_epoch%d.pth' % (epoch + 1)))
+                os.path.join(saved_path, 'net_epoch%d.pth' % (epoch + 1)))
 
         if epoch % hypes['train_params']['eval_freq'] == 0:
             valid_ave_loss = []
@@ -217,7 +212,7 @@ def main():
                                                               temporal_result_stats))
             writer.add_scalar('Validate_Loss', valid_ave_loss, epoch)
 
-    print('Training Finished, checkpoints saved to %s' % RUN_PATH)
+    print('Training Finished, checkpoints saved to %s' % saved_path)
 
 
 if __name__ == '__main__':
