@@ -31,23 +31,24 @@ def default_none(value, default):
 
 
 def set_category_by_camera_props(camera_props: dict, category_config: dict):
-    cam_prop_occlusion = 0.0 if camera_props['occlusion'] is None else camera_props['occlusion']
-    cam_prop_bbox_height = 0.0 if camera_props['bbox_height'] is None else camera_props['bbox_height']
-    cam_prop_truncation = 0.0 if camera_props['truncation'] is None else camera_props['truncation']
+    # Retrieve camera properties with defaults for None values
+    cam_prop_occlusion = camera_props.get('occlusion', 0.0) or 0.0
+    cam_prop_bbox_height = camera_props.get('bbox_height', 0.0) or 0.0
+    cam_prop_truncation = camera_props.get('truncation', 0.0) or 0.0
 
-    # List of categories in descending order of difficulty
-    categories = list(category_config.keys())
+    # Cache 'none' category to avoid repeated dictionary lookups
+    none_category = KITTI_DETECTION_CATEGORY_ENUM['none']
 
-    # Iterate over the categories and check conditions
-    for category in categories:
-        config = category_config[category]
+    # Iterate over the categories in descending order of difficulty
+    for category, config in category_config.items():
         if (cam_prop_bbox_height >= config['bbox_height'] and 
             cam_prop_occlusion <= config['occlusion'] and 
             cam_prop_truncation <= config['truncation']):
-            return KITTI_DETECTION_CATEGORY_ENUM[category]
+            # Return the corresponding category if conditions match
+            return KITTI_DETECTION_CATEGORY_ENUM.get(category, none_category)
 
-    # If none of the categories match, return 'none'
-    return KITTI_DETECTION_CATEGORY_ENUM['none']
+    # Return 'none' if no category matches
+    return none_category
     
 
 # def categorize_vehicle_visibility_by_lidar_hits(vehicle_list: list, category_config: dict):

@@ -36,46 +36,40 @@ def corner_to_center(corner3d, order='lwh'):
     assert corner3d.ndim == 3
     batch_size = corner3d.shape[0]
 
+    # Calculate the center (x, y, z) as the mean of selected corner points
     xyz = np.mean(corner3d[:, [0, 3, 5, 6], :], axis=1)
-    h = abs(np.mean(corner3d[:, 4:, 2] - corner3d[:, :4, 2], axis=1,
-                    keepdims=True))
-    l = (np.sqrt(np.sum((corner3d[:, 0, [0, 1]] - corner3d[:, 3, [0, 1]]) ** 2,
-                        axis=1, keepdims=True)) +
-         np.sqrt(np.sum((corner3d[:, 2, [0, 1]] - corner3d[:, 1, [0, 1]]) ** 2,
-                        axis=1, keepdims=True)) +
-         np.sqrt(np.sum((corner3d[:, 4, [0, 1]] - corner3d[:, 7, [0, 1]]) ** 2,
-                        axis=1, keepdims=True)) +
-         np.sqrt(np.sum((corner3d[:, 5, [0, 1]] - corner3d[:, 6, [0, 1]]) ** 2,
-                        axis=1, keepdims=True))) / 4
 
-    w = (np.sqrt(
-        np.sum((corner3d[:, 0, [0, 1]] - corner3d[:, 1, [0, 1]]) ** 2, axis=1,
-               keepdims=True)) +
-         np.sqrt(np.sum((corner3d[:, 2, [0, 1]] - corner3d[:, 3, [0, 1]]) ** 2,
-                        axis=1, keepdims=True)) +
-         np.sqrt(np.sum((corner3d[:, 4, [0, 1]] - corner3d[:, 5, [0, 1]]) ** 2,
-                        axis=1, keepdims=True)) +
-         np.sqrt(np.sum((corner3d[:, 6, [0, 1]] - corner3d[:, 7, [0, 1]]) ** 2,
-                        axis=1, keepdims=True))) / 4
+    # Calculate height (h)
+    h = np.abs(np.mean(corner3d[:, 4:, 2] - corner3d[:, :4, 2], axis=1, keepdims=True))
 
-    theta = (np.arctan2(corner3d[:, 1, 1] - corner3d[:, 2, 1],
-                        corner3d[:, 1, 0] - corner3d[:, 2, 0]) +
-             np.arctan2(corner3d[:, 0, 1] - corner3d[:, 3, 1],
-                        corner3d[:, 0, 0] - corner3d[:, 3, 0]) +
-             np.arctan2(corner3d[:, 5, 1] - corner3d[:, 6, 1],
-                        corner3d[:, 5, 0] - corner3d[:, 6, 0]) +
-             np.arctan2(corner3d[:, 4, 1] - corner3d[:, 7, 1],
-                        corner3d[:, 4, 0] - corner3d[:, 7, 0]))[:,
-            np.newaxis] / 4
+    # Pre-compute distances for length (l) and width (w)
+    distances = {
+        "l": (np.linalg.norm(corner3d[:, 0, :2] - corner3d[:, 3, :2], axis=1) +
+              np.linalg.norm(corner3d[:, 2, :2] - corner3d[:, 1, :2], axis=1) +
+              np.linalg.norm(corner3d[:, 4, :2] - corner3d[:, 7, :2], axis=1) +
+              np.linalg.norm(corner3d[:, 5, :2] - corner3d[:, 6, :2], axis=1)) / 4,
+        "w": (np.linalg.norm(corner3d[:, 0, :2] - corner3d[:, 1, :2], axis=1) +
+              np.linalg.norm(corner3d[:, 2, :2] - corner3d[:, 3, :2], axis=1) +
+              np.linalg.norm(corner3d[:, 4, :2] - corner3d[:, 5, :2], axis=1) +
+              np.linalg.norm(corner3d[:, 6, :2] - corner3d[:, 7, :2], axis=1)) / 4
+    }
+    l = distances["l"].reshape(batch_size, 1)
+    w = distances["w"].reshape(batch_size, 1)
 
+    # Calculate the orientation angle (yaw) as the average of arctans between specific corner pairs
+    theta = (np.arctan2(corner3d[:, 1, 1] - corner3d[:, 2, 1], corner3d[:, 1, 0] - corner3d[:, 2, 0]) +
+             np.arctan2(corner3d[:, 0, 1] - corner3d[:, 3, 1], corner3d[:, 0, 0] - corner3d[:, 3, 0]) +
+             np.arctan2(corner3d[:, 5, 1] - corner3d[:, 6, 1], corner3d[:, 5, 0] - corner3d[:, 6, 0]) +
+             np.arctan2(corner3d[:, 4, 1] - corner3d[:, 7, 1], corner3d[:, 4, 0] - corner3d[:, 7, 0])) / 4
+    theta = theta.reshape(batch_size, 1)
+
+    # Concatenate the output according to the specified order
     if order == 'lwh':
-        return np.concatenate([xyz, l, w, h, theta], axis=1).reshape(
-            batch_size, 7)
+        return np.concatenate([xyz, l, w, h, theta], axis=1)
     elif order == 'hwl':
-        return np.concatenate([xyz, h, w, l, theta], axis=1).reshape(
-            batch_size, 7)
+        return np.concatenate([xyz, h, w, l, theta], axis=1)
     else:
-        sys.exit('Unknown order')
+        raise ValueError("Invalid order specified. Use 'lwh' or 'hwl'.")
 
 
 def boxes_to_corners2d(boxes3d, order):
@@ -144,49 +138,44 @@ def boxes2d_to_corners2d(boxes2d, order="lwh"):
 
 def boxes_to_corners_3d(boxes3d, order):
     """
-        4 -------- 5
-       /|         /|
-      7 -------- 6 .
-      | |        | |
-      . 0 -------- 1
-      |/         |/
-      3 -------- 2
-    Parameters
-    __________
-    boxes3d: np.ndarray or torch.Tensor
-        (N, 7) [x, y, z, dx, dy, dz, heading], (x, y, z) is the box center.
+        Converts 3D bounding boxes to corner points.
 
+    Parameters
+    ----------
+    boxes3d : np.ndarray or torch.Tensor
+        (N, 7) [x, y, z, dx, dy, dz, heading], (x, y, z) is the box center.
     order : str
         'lwh' or 'hwl'
 
-    Returns:
-        corners3d: np.ndarray or torch.Tensor
+    Returns
+    -------
+    corners3d : np.ndarray or torch.Tensor
         (N, 8, 3), the 8 corners of the bounding box.
-
     """
-    # ^ z
-    # |
-    # |
-    # | . x
-    # |/
-    # +-------> y
-
+    # Convert boxes3d to tensor if necessary
     boxes3d, is_numpy = common_utils.check_numpy_to_torch(boxes3d)
-    boxes3d_ = boxes3d
-
+    
+    # Swap order if 'hwl'
     if order == 'hwl':
-        boxes3d_ = boxes3d[:, [0, 1, 2, 5, 4, 3, 6]]
+        boxes3d = boxes3d[:, [0, 1, 2, 5, 4, 3, 6]]
 
-    template = boxes3d_.new_tensor((
+    # Define corner template (8 corners) and use broadcasting
+    template = boxes3d.new_tensor([
         [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, -1],
-        [1, -1, 1], [1, 1, 1], [-1, 1, 1], [-1, -1, 1],
-    )) / 2
+        [1, -1, 1], [1, 1, 1], [-1, 1, 1], [-1, -1, 1]
+    ]) / 2
 
-    corners3d = boxes3d_[:, None, 3:6].repeat(1, 8, 1) * template[None, :, :]
-    corners3d = common_utils.rotate_points_along_z(corners3d.view(-1, 8, 3),
-                                                   boxes3d_[:, 6]).view(-1, 8,
-                                                                        3)
-    corners3d += boxes3d_[:, None, 0:3]
+    # Calculate corners3d by applying template and broadcasting box dimensions
+    dims = boxes3d[:, 3:6]  # (N, 3)
+    corners3d = (dims[:, None, :] * template[None, :, :])  # (N, 8, 3)
+
+    # Rotate corners based on heading angle
+    corners3d = common_utils.rotate_points_along_z(
+        corners3d.view(-1, 8, 3), boxes3d[:, 6]
+    ).view(-1, 8, 3)
+
+    # Translate corners to center location
+    corners3d += boxes3d[:, None, :3]  # Add center coordinates
 
     return corners3d.numpy() if is_numpy else corners3d
 

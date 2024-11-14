@@ -11,9 +11,11 @@ from opencood.data_utils.pre_processor import build_preprocessor
 
 
 class BaseTemporalLidarDataset(BaseTemporalDataset):
-    def __init__(self, params, visualize, train=True, validate=False, timestamp_offset: int = 0, **kwargs):
+    def __init__(self, params, visualize, train=True, validate=False, timestamp_offset: int = 0, preload_lidar_files=False, **kwargs):
         super(BaseTemporalLidarDataset, self).__init__(params, visualize, train,
-                                                validate, timestamp_offset=timestamp_offset, **kwargs)
+                                                validate, timestamp_offset=timestamp_offset,
+                                                preload_lidar_files=preload_lidar_files, preload_camera_files=False,
+                                                **kwargs)
         self.pre_processor = build_preprocessor(params['preprocess'], train)
         
         self.post_processor = build_postprocessor(params['postprocess'], train)

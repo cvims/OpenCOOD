@@ -29,6 +29,7 @@ def create_temporal_result_stat_dict():
 
 def main():
     eval_utils.set_random_seed(0)
+    LOAD_LIDAR_FILES_IN_RAM = True
 
     # MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
     MODEL_DIR = None
@@ -49,9 +50,11 @@ def main():
     print('-----------------Dataset Building------------------')
     opencood_train_dataset = build_dataset(
         hypes, visualize=False, train=True,
+        preload_lidar_files=LOAD_LIDAR_FILES_IN_RAM,
         use_scenarios_idx=train_scenario_idx)
     opencood_validate_dataset = build_dataset(
         hypes, visualize=False, train=False,
+        preload_lidar_files=LOAD_LIDAR_FILES_IN_RAM,
         )
 
     train_loader = DataLoader(opencood_train_dataset,

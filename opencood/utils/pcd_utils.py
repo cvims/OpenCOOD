@@ -30,16 +30,22 @@ def pcd_to_np(pcd_file, lidar_container=None):
     """
     if lidar_container is None:
         pcd = o3d.io.read_point_cloud(pcd_file)
+        xyz = np.asarray(pcd.points)
+        intensity = np.expand_dims(np.asarray(pcd.colors)[:, 0], -1)
     else:
-        if pcd_file in lidar_container:
-            pcd = lidar_container[pcd_file]
+        if pcd_file + '_points' in lidar_container:
+            # pcd = lidar_container[pcd_file]
+            xyz = lidar_container[pcd_file + '_points']
+            intensity = lidar_container[pcd_file + '_intensity']
         else:
             pcd = o3d.io.read_point_cloud(pcd_file)
-            lidar_container[pcd_file] = pcd
+            xyz = np.asarray(pcd.points)
+            intensity = np.expand_dims(np.asarray(pcd.colors)[:, 0], -1)
+            lidar_container[pcd_file + '_points'] = xyz
+            lidar_container[pcd_file + '_intensity'] = intensity            
 
-    xyz = np.asarray(pcd.points)
-    # we save the intensity in the first channel
-    intensity = np.expand_dims(np.asarray(pcd.colors)[:, 0], -1)
+    # # we save the intensity in the first channel
+    # intensity = np.expand_dims(np.asarray(pcd.colors)[:, 0], -1)
     pcd_np = np.hstack((xyz, intensity))
 
     return np.asarray(pcd_np, dtype=np.float32)
@@ -63,15 +69,14 @@ def mask_points_by_range(points, limit_range):
         Filtered lidar points.
     """
 
-    mask = (points[:, 0] > limit_range[0]) & (points[:, 0] < limit_range[3])\
-           & (points[:, 1] > limit_range[1]) & (
-                   points[:, 1] < limit_range[4]) \
-           & (points[:, 2] > limit_range[2]) & (
-                   points[:, 2] < limit_range[5])
+    # Create a mask by stacking conditions along the last axis and using np.all
+    min_bounds = np.array(limit_range[:3])
+    max_bounds = np.array(limit_range[3:])
 
-    points = points[mask]
-
-    return points
+    # Efficient masking by checking all conditions in one pass
+    mask = np.all((points[:,:3] >= min_bounds) & (points[:,:3] <= max_bounds), axis=1)
+    
+    return points[mask]
 
 
 def mask_ego_points(points):
@@ -88,11 +93,15 @@ def mask_ego_points(points):
     points : np.ndarray
         Filtered lidar points.
     """
-    mask = (points[:, 0] >= -1.95) & (points[:, 0] <= 2.95) \
-           & (points[:, 1] >= -1.1) & (points[:, 1] <= 1.1)
-    points = points[np.logical_not(mask)]
+    # Define bounds to exclude points within the ego vehicle's range
+    x_bounds = (-1.95, 2.95)
+    y_bounds = (-1.1, 1.1)
 
-    return points
+    # Create mask in one step and directly filter out points within ego range
+    mask = (points[:, 0] < x_bounds[0]) | (points[:, 0] > x_bounds[1]) | \
+           (points[:, 1] < y_bounds[0]) | (points[:, 1] > y_bounds[1])
+
+    return points[mask]
 
 
 def shuffle_points(points):

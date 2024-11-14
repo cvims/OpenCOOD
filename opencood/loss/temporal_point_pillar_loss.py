@@ -108,9 +108,6 @@ class TemporalPointPillarLoss(nn.Module):
         temp_box_cls_labels = temp_box_cls_labels.view(psm.shape[0], -1).contiguous()
         temp_positives = temp_box_cls_labels > 0
 
-        if temp_positives.sum() > 0:
-            print('hier')
-
         # standard
         positives = box_cls_labels > 0
         negatives = box_cls_labels == 0
