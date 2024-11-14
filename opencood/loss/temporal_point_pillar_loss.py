@@ -95,7 +95,7 @@ class TemporalPointPillarLoss(nn.Module):
         rm = output_dict['rm']
         psm = output_dict['psm']
         targets = target_dict['targets']
-        temporal_targets = temporal_target_dict['targets']
+        # temporal_targets = temporal_target_dict['targets']
 
         cls_preds = psm.permute(0, 2, 3, 1).contiguous()
 
@@ -106,16 +106,8 @@ class TemporalPointPillarLoss(nn.Module):
         # temporal
         temp_box_cls_labels = temporal_target_dict['pos_equal_one']
         temp_box_cls_labels = temp_box_cls_labels.view(psm.shape[0], -1).contiguous()
-
-        # re-update the standard box_cls_labels. To remove the temporal labels from the
-        # target_dict contains all the labels. temporal_target_dict contains only the temporal labels (they are also part of the target_dict)
-        box_cls_labels = box_cls_labels - temp_box_cls_labels
-
-        temp_box_cls_labels = temporal_target_dict['pos_equal_one']
-        temp_box_cls_labels = temp_box_cls_labels.view(psm.shape[0], -1).contiguous()
-
-        # temporal
         temp_positives = temp_box_cls_labels > 0
+
         if temp_positives.sum() > 0:
             print('hier')
 
@@ -131,7 +123,6 @@ class TemporalPointPillarLoss(nn.Module):
         pos_normalizer = positives.sum(1, keepdim=True).float()
         reg_weights /= torch.clamp(pos_normalizer, min=1.0)
         cls_weights /= torch.clamp(pos_normalizer, min=1.0)
-        org_cls_weights = torch.clone(cls_weights).to(cls_weights.device)
         cls_targets = box_cls_labels
         cls_targets = cls_targets.unsqueeze(dim=-1)
 
@@ -156,22 +147,22 @@ class TemporalPointPillarLoss(nn.Module):
             weights=cls_weights)  # [N, M]
         # copy cls_loss_src without losing back prop info
         _cls_loss_src = cls_loss_src.clone()
-        _cls_loss_src[temp_positives > 0] = 0.0
-        cls_loss = _cls_loss_src.sum() / psm.shape[0]
-        conf_loss = cls_loss * self.cls_weight
+        _cls_loss_src[temp_positives == True] = 0.0
+        conf_loss = _cls_loss_src.sum() / psm.shape[0]
+        conf_loss = conf_loss * self.cls_weight
 
         _temp_cls_loss_src = cls_loss_src.clone()
-        _temp_cls_loss_src[temp_positives <= 0] = 0.0
-        temp_cls_loss = _temp_cls_loss_src.sum() / psm.shape[0]
-        temp_conf_loss = temp_cls_loss * self.temporal_cls_weight
+        _temp_cls_loss_src[temp_positives == False] = 0.0
+        temp_conf_loss = _temp_cls_loss_src.sum() / psm.shape[0]
+        temp_conf_loss = temp_conf_loss * self.temporal_cls_weight
 
-        # original loss test
-        org_cls_loss_src = self.cls_loss_func(
-            cls_preds,
-            one_hot_targets,
-            weights=org_cls_weights)  # [N, M]
-        org_cls_loss = org_cls_loss_src.sum() / psm.shape[0]
-        org_conf_loss = org_cls_loss * self.cls_weight
+        # # original loss test
+        # org_cls_loss_src = self.cls_loss_func(
+        #     cls_preds,
+        #     one_hot_targets,
+        #     weights=cls_weights)  # [N, M]
+        # org_conf_loss = org_cls_loss_src.sum() / psm.shape[0]
+        # org_conf_loss = org_conf_loss * self.cls_weight
 
         # regression
         rm = rm.permute(0, 2, 3, 1).contiguous()
@@ -183,15 +174,31 @@ class TemporalPointPillarLoss(nn.Module):
             self.reg_loss_func(box_preds_sin,
                                reg_targets_sin,
                                weights=reg_weights)
-        reg_loss = loc_loss_src.sum() / rm.shape[0]
-        reg_loss *= self.reg_coe
+        _loc_loss_src = loc_loss_src.clone()
+        _loc_loss_src[temp_positives == True] = 0.0
+        reg_loss = _loc_loss_src.sum() / rm.shape[0]
+        reg_loss = reg_loss * self.reg_coe
 
-        total_loss = reg_loss + conf_loss + temp_conf_loss
+        _temp_loc_loss_src = loc_loss_src.clone()
+        _temp_loc_loss_src[temp_positives == False] = 0.0
+        temp_reg_loss = _temp_loc_loss_src.sum() / rm.shape[0]
+        temp_reg_loss = temp_reg_loss * self.temporal_reg_coe
+
+        # # original loss test
+        # org_loc_loss_src =\
+        #     self.reg_loss_func(box_preds_sin,
+        #                        reg_targets_sin,
+        #                        weights=reg_weights)
+        # org_reg_loss = org_loc_loss_src.sum() / rm.shape[0]
+        # org_reg_loss = org_reg_loss * self.reg_coe
+
+        total_loss = reg_loss + temp_reg_loss + conf_loss + temp_conf_loss
 
         self.loss_dict.update({'total_loss': total_loss,
                                'reg_loss': reg_loss,
                                'conf_loss': conf_loss,
-                               'temp_conf_loss': temp_conf_loss})
+                               'temp_conf_loss': temp_conf_loss,
+                               'temp_reg_loss': temp_reg_loss})
 
         return total_loss
 
