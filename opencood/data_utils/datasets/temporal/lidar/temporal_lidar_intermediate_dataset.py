@@ -631,31 +631,38 @@ if __name__ == '__main__':
 
     params['root_dir'] = '/data/public_datasets/OPV2V/original/test'
 
-    with Manager() as manager:
-        lidar_dict = manager.dict()
+    dataset = TemporalLidarIntermediateFusionDataset(
+        params, visualize=False, train=True, validate=False,
+        preload_lidar_files=True)
 
-        dataset = TemporalLidarIntermediateFusionDataset(
-            params, visualize=False, train=True, validate=False,
-            preload_lidar_files=True, lidar_dict=lidar_dict)
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        collate_fn=dataset.collate_batch,
+        num_workers=8)
 
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=8)
+    _start_time = time.time()
+    for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
+        if i == 500:
+            break
+    _end_time = time.time()
+    print(f"Time: {_end_time - _start_time}")
 
-        _start_time = time.time()
-        for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
-            if i == 200:
-                break
-        _end_time = time.time()
-        print(f"Time: {_end_time - _start_time}")
+    dataset = TemporalLidarIntermediateFusionDataset(
+        params, visualize=False, train=True, validate=False,
+        preload_lidar_files=False)
 
-        dataset = TemporalLidarIntermediateFusionDataset(
-            params, visualize=False, train=True, validate=False,
-            preload_lidar_files=False)
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        collate_fn=dataset.collate_batch,
+        num_workers=8)
 
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=8)
-
-        _start_time = time.time()
-        for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
-            if i == 200:
-                break
-        _end_time = time.time()
-        print(f"Time: {_end_time - _start_time}")
+    _start_time = time.time()
+    for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
+        if i == 500:
+            break
+    _end_time = time.time()
+    print(f"Time: {_end_time - _start_time}")

@@ -37,9 +37,12 @@ def main():
     # MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/scope/point_pillar_scope_more_steps_all_cavs_2024_11_12_19_54_32'
     # HYPES_YAML_FILE = os.path.join(MODEL_DIR, 'config.yaml')
 
+    # MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/202411131117'
+    # HYPES_YAML_FILE = os.path.join(MODEL_DIR, 'config.yaml')
+
     # STANDARD SCOPE SETTING: Temporal steps = 2; Temporal ego only: True
 
-    TEMPORAL_STEPS = 2
+    TEMPORAL_STEPS = 4
     
     hypes = yaml_utils.load_yaml(HYPES_YAML_FILE, None)
     hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
@@ -50,6 +53,10 @@ def main():
     hypes['wild_setting']['xyz_std'] = 0.2
     hypes['wild_setting']['ryp_std'] = 0.2
 
+    hypes['train_params']['batch_size'] = 1
+    hypes['train_params']['frame'] = TEMPORAL_STEPS - 1
+    hypes['model']['args']['fusion_args']['frame'] = TEMPORAL_STEPS - 1
+
     # DEBUG
     use_scenarios_idx = [0]
 
@@ -57,13 +64,14 @@ def main():
     opencood_dataset = build_dataset(
         hypes, visualize=True, train=False,
         use_scenarios_idx=use_scenarios_idx,
+        preload_lidar_files=True
     )
     print(f"{len(opencood_dataset)} samples found.")
 
     data_loader = DataLoader(
         opencood_dataset,
         batch_size=1,
-        num_workers=16,
+        num_workers=8,
         collate_fn=opencood_dataset.collate_batch_test,
         shuffle=False,
         pin_memory=False,

@@ -6,6 +6,7 @@ import numpy as np
 from torch.utils.data import Dataset
 import pickle
 import random
+import torch
 import concurrent.futures
 import tqdm
 from multiprocessing import Manager
@@ -103,41 +104,34 @@ class BaseDataset(Dataset):
         self.kitti_detection_criteria = detection_criteria['criteria']
         self.kitti_detection_criteria_threshold = KITTI_DETECTION_CATEGORY_ENUM[detection_criteria['criteria_threshold']]
 
-        self.lidar_cache_container = kwargs['lidar_dict'] if 'lidar_dict' in kwargs else None
+        self.lidar_cache_container = None
         self.camera_cache_container = None
 
         self.reinitialize()
 
         self._preload_sensor_data(preload_lidar_files, preload_camera_files)
+
     
     def _preload_sensor_data(self, preload_lidar_files, preload_camera_files):
         # iterate scenario database to preload lidar and camera data
         # parallel loading. Use tqdm to show the progress bar
-        if preload_lidar_files and self.lidar_cache_container is not None:
-            with Manager() as manager:
-                _lidar_cache_container = dict()
-                for scenario in tqdm.tqdm(self.scenario_database.values(), desc='Preloading lidar files'):
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        for cav in scenario.values():
-                            for timestamp in cav.keys():
-                                if timestamp.isdigit():
-                                    executor.submit(pcd_to_np, cav[timestamp]['lidar'], _lidar_cache_container)
-                                    # pcd_to_np(cav[timestamp]['lidar'], self.lidar_cache_container)
-
-            keys = list(_lidar_cache_container.keys())
-            for key in keys:
-                self.lidar_cache_container.update({key: _lidar_cache_container[key]})
-                del _lidar_cache_container[key]
+        if preload_lidar_files:
+            self.lidar_cache_container = dict()
+            for scenario in tqdm.tqdm(self.scenario_database.values(), desc='Preloading lidar files'):
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    for cav in scenario.values():
+                        for timestamp in cav.keys():
+                            if timestamp.isdigit():
+                                executor.submit(pcd_to_np, cav[timestamp]['lidar'], self.lidar_cache_container)
 
         if preload_camera_files:
-            with Manager() as manager:
-                self.camera_cache_container = manager.dict()
-                for scenario in tqdm.tqdm(self.scenario_database.values(), desc='Preloading camera files'):
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        for cav in scenario.values():
-                            for timestamp in cav.keys():
-                                if timestamp.isdigit():
-                                    executor.submit(load_rgb_from_files, cav[timestamp]['cameras'], self.camera_cache_container)
+            self.camera_cache_container = dict()
+            for scenario in tqdm.tqdm(self.scenario_database.values(), desc='Preloading camera files'):
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    for cav in scenario.values():
+                        for timestamp in cav.keys():
+                            if timestamp.isdigit():
+                                executor.submit(load_rgb_from_files, cav[timestamp]['cameras'], self.camera_cache_container)
 
     def reinitialize(self):
         self.scenario_database = OrderedDict()
@@ -540,6 +534,7 @@ class BaseDataset(Dataset):
         
         if load_lidar_data:
             cav_data['lidar_np'] = pcd_to_np(cav_content[timestamp_key_delay]['lidar'], self.lidar_cache_container)
+            # cav_data['lidar_np'] = pcd_to_np(cav_content[timestamp_key_delay]['lidar'], self.worker_lidar_cache)
 
         if load_camera_data:
             cav_data['camera_np'] = load_rgb_from_files(cav_content[timestamp_key_delay]['cameras'], self.camera_cache_container)
