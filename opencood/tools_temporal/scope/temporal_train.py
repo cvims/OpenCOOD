@@ -29,13 +29,16 @@ def create_temporal_result_stat_dict():
 
 def main():
     eval_utils.set_random_seed(0)
-    LOAD_LIDAR_FILES_IN_RAM = True
+    LOAD_LIDAR_FILES_IN_RAM = False
 
     # MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
     MODEL_DIR = None
-    HYPES_YAML = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/temporal/scope_temporal_4_steps.yaml'
+    # HYPES_YAML = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/temporal/scope_temporal_4_steps_temp_loss.yaml'
     HALF_PRECISION = False
     EPOCHS = 40
+
+    MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/scope_temporal_4_steps_2024_11_15_11_50_15'
+    HYPES_YAML = os.path.join(MODEL_DIR, 'config.yaml')
 
     # scenarios with more than 50 temporal potential vehicles (temporal steps = 4; communication dropout = 0.25)
     # train_scenario_idx = [
@@ -66,7 +69,7 @@ def main():
                                 drop_last=True)
     val_loader = DataLoader(opencood_validate_dataset,
                             batch_size=1,
-                            num_workers=16,
+                            num_workers=1,
                             collate_fn=opencood_train_dataset.collate_batch_test,
                             shuffle=False,
                             pin_memory=False,
@@ -119,54 +122,54 @@ def main():
 
         pbar_train = tqdm.tqdm(total=len(train_loader), leave=True)
 
-        for i, batch_data_list in enumerate(train_loader):
-            # the model will be evaluation mode during validation
-            model.train()
-            model.zero_grad()
-            optimizer.zero_grad()
+        # for i, batch_data_list in enumerate(train_loader):
+        #     # the model will be evaluation mode during validation
+        #     model.train()
+        #     model.zero_grad()
+        #     optimizer.zero_grad()
 
-            batch_data = batch_data_list[-1]
+        #     batch_data = batch_data_list[-1]
 
-            batch_data_list = train_utils.to_device(batch_data_list, device)
-            batch_data = train_utils.to_device(batch_data, device)
+        #     batch_data_list = train_utils.to_device(batch_data_list, device)
+        #     batch_data = train_utils.to_device(batch_data, device)
 
-            # _, gt_object_ids = opencood_train_dataset.post_processor.generate_gt_bbx(batch_data)
-            # gt_object_ids_criteria = batch_data['ego']['object_detection_info_mapping']
-            # gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
+        #     # _, gt_object_ids = opencood_train_dataset.post_processor.generate_gt_bbx(batch_data)
+        #     # gt_object_ids_criteria = batch_data['ego']['object_detection_info_mapping']
+        #     # gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
 
-            if not HALF_PRECISION:
-                output_dict = model(batch_data_list)
-                # first argument is always your output dictionary,
-                # second argument is always your label dictionary.
-                final_loss = criterion(
-                    output_dict,
-                    batch_data['ego']['label_dict'],
-                    batch_data['ego']['temporal_label_dict'])
-            else:
-                with torch.cuda.amp.autocast():
-                    output_dict = model(batch_data['ego'])
-                    final_loss = criterion(
-                        output_dict,
-                        batch_data['ego']['label_dict'],
-                        batch_data['ego']['temporal_label_dict'])
+        #     if not HALF_PRECISION:
+        #         output_dict = model(batch_data_list)
+        #         # first argument is always your output dictionary,
+        #         # second argument is always your label dictionary.
+        #         final_loss = criterion(
+        #             output_dict,
+        #             batch_data['ego']['label_dict'],
+        #             batch_data['ego']['temporal_label_dict'])
+        #     else:
+        #         with torch.cuda.amp.autocast():
+        #             output_dict = model(batch_data['ego'])
+        #             final_loss = criterion(
+        #                 output_dict,
+        #                 batch_data['ego']['label_dict'],
+        #                 batch_data['ego']['temporal_label_dict'])
 
-            criterion.logging(epoch, i, len(train_loader), writer, pbar=pbar_train)
-            pbar_train.update(1)
+        #     criterion.logging(epoch, i, len(train_loader), writer, pbar=pbar_train)
+        #     pbar_train.update(1)
 
-            if not HALF_PRECISION:
-                final_loss.backward()
-                optimizer.step()
-            else:
-                scaler.scale(final_loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+        #     if not HALF_PRECISION:
+        #         final_loss.backward()
+        #         optimizer.step()
+        #     else:
+        #         scaler.scale(final_loss).backward()
+        #         scaler.step(optimizer)
+        #         scaler.update()
 
-            if hypes['lr_scheduler']['core_method'] == 'cosineannealwarm':
-                scheduler.step_update(epoch * num_steps + i)
+        #     if hypes['lr_scheduler']['core_method'] == 'cosineannealwarm':
+        #         scheduler.step_update(epoch * num_steps + i)
 
-        if epoch % hypes['train_params']['save_freq'] == 0:
-            torch.save(model_without_ddp.state_dict(),
-                os.path.join(saved_path, 'net_epoch%d.pth' % (epoch + 1)))
+        # if epoch % hypes['train_params']['save_freq'] == 0:
+        #     torch.save(model_without_ddp.state_dict(),
+        #         os.path.join(saved_path, 'net_epoch%d.pth' % (epoch + 1)))
 
         if epoch % hypes['train_params']['eval_freq'] == 0:
             valid_ave_loss = []

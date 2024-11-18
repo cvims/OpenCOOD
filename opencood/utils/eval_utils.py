@@ -57,7 +57,7 @@ def voc_ap(rec, prec):
 def calculate_temporal_recovered_hits(det_boxes, det_score, gt_boxes, result_stat, iou_thresh, gt_object_ids_criteria):
     # match detection and groundtruth bounding box by Hungarian algorithm
     matched_pairs_indices = match_gt_det_hungarian(det_boxes, gt_boxes, iou_thresh)
-    unmatched_detections_indices = set(range(det_boxes.shape[0])) - set([pair[0] for pair in matched_pairs_indices])
+    # unmatched_detections_indices = set(range(det_boxes.shape[0])) - set([pair[0] for pair in matched_pairs_indices])
     unmatched_gt_indices = set(range(gt_boxes.shape[0])) - set([pair[1] for pair in matched_pairs_indices])
 
     filter_gts_idx = {i for i, gt_idx in enumerate(gt_object_ids_criteria) if gt_object_ids_criteria[gt_idx]['temporal_recovered']}
@@ -185,6 +185,12 @@ def calculate_iou(det_boxes, gt_boxes):
     iou_matrix : torch.Tensor
         The IoU matrix, shape (N, M).
     """
+    if det_boxes is None:
+        return torch.zeros((0, 0))
+
+    if gt_boxes is None:
+        return torch.zeros((det_boxes.shape[0], 0))
+
     # convert bounding boxes to numpy array
     det_boxes = common_utils.torch_tensor_to_numpy(det_boxes)
     gt_boxes = common_utils.torch_tensor_to_numpy(gt_boxes)
