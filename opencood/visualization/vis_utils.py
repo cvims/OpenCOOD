@@ -4,6 +4,8 @@
 
 import time
 
+import os
+import torch
 import cv2
 import numpy as np
 import open3d as o3d
@@ -17,8 +19,45 @@ from opencood.utils import common_utils
 
 import pickle as pkl
 
+
 VIRIDIS = np.array(cm.get_cmap('plasma').colors)
 VID_RANGE = np.linspace(0.0, 1.0, VIRIDIS.shape[0])
+
+
+def plot_feature_map(feature_maps, save_path):
+    """
+    Plot the feature map.
+
+    Parameters
+    ----------
+    feature_map : np.ndarray
+        The feature map to plot.
+        Shape: [BS, C, H, W]
+
+    save_path : str
+        The save path.
+    """
+    if isinstance(feature_maps, list):
+        feature_maps = torch.stack(feature_maps, dim=0)
+
+    feature_maps = feature_maps.cpu().detach().numpy()
+    bs, c, h, w = feature_maps.shape
+
+    reduced_maps = []
+    for i in range(bs):
+        # mean to one channel
+        reduced_map = np.mean(feature_maps[i], axis=0)
+        reduced_maps.append(reduced_map)
+
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    
+    # save to disk
+    for i in range(bs):
+        plt.imshow(reduced_maps[i])
+        plt.axis("off")
+        plt.savefig(os.path.join(save_path, f"feature_map_{i}.png"))
+        plt.close()
 
 
 def bbx2linset(bbx_corner, order='hwl', color=(0, 1, 0)):

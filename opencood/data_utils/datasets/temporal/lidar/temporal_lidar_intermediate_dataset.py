@@ -501,7 +501,7 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 'label_dict': label_torch_dict,
                 'temporal_label_dict': temporal_label_torch_dict,
                 'object_ids': object_ids,
-                'object_detection_info_mapping': object_detection_info_mapping_list[-1],
+                'object_detection_info_mapping': object_detection_info_mapping_list,
                 'cav_ids': cav_ids,
                 'prior_encoding': prior_encoding,
                 'spatial_correction_matrix': spatial_correction_matrix_list,

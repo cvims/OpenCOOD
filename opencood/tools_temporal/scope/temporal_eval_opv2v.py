@@ -32,11 +32,13 @@ def create_temporal_result_stat_dict():
 def main():
     eval_utils.set_random_seed(0)
 
+    DATA_PATH = '/data/public_datasets/OPV2V/original/train'
+
     MODEL_DIRS = [
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V',
+        r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/scope/point_pillar_scope_more_steps_all_cavs_2024_11_12_19_54_32',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/202411131117',
-        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/scope_temporal_4_steps_2024_11_15_11_50_15'
+        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/scope_temporal_4_steps_2024_11_15_11_50_15'
     ]
 
     HYPES_YAML_FILES = [os.path.join(model_dir, 'config.yaml') for model_dir in MODEL_DIRS]
@@ -50,6 +52,10 @@ def main():
 
     for MODEL_DIR, HYPES_YAML_FILE in zip(MODEL_DIRS, HYPES_YAML_FILES):
         hypes = yaml_utils.load_yaml(HYPES_YAML_FILE, None)
+
+        hypes['root_dir'] = DATA_PATH
+        hypes['validate_dir'] = DATA_PATH
+
         hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
         hypes['fusion']['args']['temporal_ego_only'] = TEMPORAL_EGO_ONLY
 
@@ -64,6 +70,7 @@ def main():
 
         # DEBUG
         use_scenarios_idx = [0]
+        use_scenarios_idx = None
 
         print('Dataset Building')
         opencood_dataset = build_dataset(
@@ -76,7 +83,7 @@ def main():
         data_loader = DataLoader(
             opencood_dataset,
             batch_size=1,
-            num_workers=1,
+            num_workers=16,
             collate_fn=opencood_dataset.collate_batch_test,
             shuffle=False,
             pin_memory=False,

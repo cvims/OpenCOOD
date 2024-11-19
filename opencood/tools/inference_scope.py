@@ -96,7 +96,7 @@ def main():
     print(f"{len(opencood_dataset)} samples found.")
     data_loader = DataLoader(opencood_dataset,
                              batch_size=1,
-                             num_workers=16,
+                             num_workers=1,
                              collate_fn=opencood_dataset.collate_batch_test,
                              shuffle=False,
                              pin_memory=False,
@@ -169,12 +169,12 @@ def main():
             # Evaluate OPV2V originals (same objects as in the original dataset)
             # opv2v_original_gt_box_tensor
 
-            gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
+            gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping'][-1]
             gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
             # batch size = 1, -> batch_data[-1]...[-1]
             cav_object_bbx_centers = batch_data[-1]['ego']['cav_bbx_center'][-1]
             transformation_matrix = batch_data[-1]['ego']['transformation_matrix']
-            cav_gt_box_tensor = opencood_dataset.post_process_cav_vehicle(cav_object_bbx_centers, transformation_matrix)
+            # cav_gt_box_tensor = opencood_dataset.post_process_cav_vehicle(cav_object_bbx_centers, transformation_matrix)
 
             # non-temporal evaluation
             for criteria, result_stat_dict in result_stats.items():
@@ -285,16 +285,16 @@ def main():
                 #                                   vis_save_path,
                 #                                   dataset=opencood_dataset)
             
-                vis_save_path = os.path.join(opt.vis_save_path, '%05d' % i)
-                # saves the vis as pickle file for later use
-                opencood_dataset.save_temporal_point_cloud(
-                    pred_box_tensor,
-                    gt_box_tensor,
-                    gt_object_ids_criteria,
-                    cav_gt_box_tensor,
-                    batch_data[-1]['ego']['origin_lidar'],
-                    save_path=vis_save_path
-                )
+                # vis_save_path = os.path.join(opt.vis_save_path, '%05d' % i)
+                # # saves the vis as pickle file for later use
+                # opencood_dataset.save_temporal_point_cloud(
+                #     pred_box_tensor,
+                #     gt_box_tensor,
+                #     gt_object_ids_criteria,
+                #     cav_gt_box_tensor,
+                #     batch_data[-1]['ego']['origin_lidar'],
+                #     save_path=vis_save_path
+                # )
 
             if opt.show_sequence:
                 pcd, pred_o3d_box, gt_o3d_box = \

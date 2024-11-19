@@ -40,9 +40,9 @@ def transform_feature(feature_list,matrix_list,downsample_rate,discrete_ratio):
     
     return temporal_list
 
-class PointPillarScope(nn.Module):
+class PointPillarScopeCut(nn.Module):
     def __init__(self, args):
-        super(PointPillarScope, self).__init__()
+        super(PointPillarScopeCut, self).__init__()
 
         # PIllar VFE
         self.pillar_vfe = PillarVFE(args['pillar_vfe'],
@@ -173,103 +173,10 @@ class PointPillarScope(nn.Module):
             matrix_list.append(pairwise_t_matrix)  
             regroup_feature_list.append(self.regroup(spatial_features_2d,record_len))  
             regroup_feature_list_large.append(self.regroup(spatial_features,record_len))
-    
-        # # TO DELETE
-        # import pickle
-        # import os
-        # to_pickle = {
-        #     'feature_list': [feature.cpu().detach().numpy() for feature in feature_list],
-        #     'feature_2d_list': [feature.cpu().detach().numpy() for feature in feature_2d_list],
-        #     'object_bbx_centers': [data['ego']['object_bbx_center'].cpu().detach().numpy() for data in data_dict_list],
-        #     'gt_object_ids_criteria': [data['ego']['object_detection_info_mapping'] for data in data_dict_list],
-        # }
-        # save_path = 'temporal_scope_features'
-
-        # os.makedirs(save_path, exist_ok=True)
-
-        # # find lowest available index in save_path
-        # i = 0
-        # while os.path.exists(os.path.join(save_path, f'{i}.pkl')):
-        #     i += 1
-
-        # pkl_file = f'{i}.pkl'
-
-        # with open(os.path.join(save_path, pkl_file), 'wb') as f:
-        #     pickle.dump(to_pickle, f)
-        # # TO DELETE END
         
-        pairwise_t_matrix = matrix_list[0].clone().detach()  
-        if self.frame > 0: 
-            history_feature = transform_feature(regroup_feature_list_large,matrix_list,self.downsample_rate,self.discrete_ratio)
-            history_feature_2d = transform_feature(regroup_feature_list,matrix_list,self.downsample_rate,self.discrete_ratio)
-            fusion_list = []
-            for b in range(len(history_feature)):
-                fusion_list.append(self.temporal_fusion(history_feature_2d[b]))
-            temporal_output = torch.cat(fusion_list,dim=0)  # B,C,H,W
-            psm_temporal = self.cls_head(temporal_output)
-            rm_temporal = self.reg_head(temporal_output)        
-        
-        spatial_features = feature_list[0]
-        spatial_features_2d = feature_2d_list[0]
-        batch_dict = batch_dict_list[0]
-        record_len = batch_dict['record_len']
-        
-        
-        psm_single = self.cls_head(spatial_features_2d)
-        rm_single = self.reg_head(spatial_features_2d)
-
-        if self.multi_scale:
-            fused_feature, communication_rates, result_dict = self.fusion_net(spatial_features,
-                                            psm_single,
-                                            record_len,
-                                            pairwise_t_matrix, 
-                                            self.backbone,
-                                            [self.shrink_conv, self.cls_head, self.reg_head])
-            if self.shrink_flag:
-                fused_feature = self.shrink_conv(fused_feature)
-        else: 
-            fused_feature, communication_rates, result_dict = self.fusion_net(spatial_features_2d,
-                                            psm_single,
-                                            record_len,
-                                            pairwise_t_matrix)
-                 
-        split_psm_single = self.regroup(psm_single, record_len)
-        split_rm_single = self.regroup(rm_single, record_len)
-        psm_single_v = []
-        psm_single_i = []
-        rm_single_v = []
-        rm_single_i = []
-        for b in range(len(split_psm_single)):
-            psm_single_v.append(split_psm_single[b][0:1])
-            psm_single_i.append(split_psm_single[b][1:2])
-            rm_single_v.append(split_rm_single[b][0:1])
-            rm_single_i.append(split_rm_single[b][1:2])
-        psm_single_v = torch.cat(psm_single_v, dim=0)
-        psm_single_i = torch.cat(psm_single_i, dim=0)
-        rm_single_v = torch.cat(rm_single_v, dim=0)
-        rm_single_i = torch.cat(rm_single_i, dim=0)
-        
-        psm_cross = self.cls_head(fused_feature)
-        rm_cross = self.reg_head(fused_feature)
-        
-        ego_feature_list = [x[0:1,:] for x in regroup_feature_list[0]]
-        ego_feature = torch.cat(ego_feature_list,dim=0)
-        final_feature = self.late_fusion([temporal_output,ego_feature,fused_feature],psm_temporal,psm_single_v,psm_cross)
-        # print('fused_feature:{},final_feature:{}'.format(fused_feature.shape,final_feature.shape))
-        
-        psm = self.cls_head(final_feature)
-        rm = self.reg_head(final_feature)
-
-        output_dict = {'psm': psm,
-                    'rm': rm
-                    }
-        output_dict.update(result_dict)
-        # print("communication rate:",communication_rates)
-        
-        output_dict.update({'psm_single_v': psm_single_v,
-                       'psm_single_i': psm_single_i,
-                       'rm_single_v': rm_single_v,
-                       'rm_single_i': rm_single_i,
-                       'comm_rate': communication_rates
-                       })
-        return output_dict
+        return dict(
+            feature_list=feature_list,
+            feature_2d_list=feature_2d_list,
+            object_bbx_centers=[data['ego']['object_bbx_center'] for data in data_dict_list],
+            gt_object_ids_criteria=[data['ego']['object_detection_info_mapping'] for data in data_dict_list]
+        )
