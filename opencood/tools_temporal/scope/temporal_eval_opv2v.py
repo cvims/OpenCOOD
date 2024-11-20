@@ -76,14 +76,14 @@ def main():
         opencood_dataset = build_dataset(
             hypes, visualize=True, train=False,
             use_scenarios_idx=use_scenarios_idx,
-            preload_lidar_files=True
+            preload_lidar_files=False
         )
         print(f"{len(opencood_dataset)} samples found.")
 
         data_loader = DataLoader(
             opencood_dataset,
             batch_size=1,
-            num_workers=16,
+            num_workers=1,
             collate_fn=opencood_dataset.collate_batch_test,
             shuffle=False,
             pin_memory=False,

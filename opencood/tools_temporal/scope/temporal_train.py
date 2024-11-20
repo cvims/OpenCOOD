@@ -196,7 +196,7 @@ def main():
                     pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids = \
                     opencood_validate_dataset.post_process(batch_data, {'ego': output_dict})
 
-                    _, gt_object_ids = opencood_train_dataset.post_processor.generate_gt_bbx(batch_data)
+                    _, gt_object_ids = opencood_validate_dataset.post_processor.generate_gt_bbx(batch_data)
                     gt_object_ids_criteria = batch_data['ego']['object_detection_info_mapping'][-1]
                     gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
 

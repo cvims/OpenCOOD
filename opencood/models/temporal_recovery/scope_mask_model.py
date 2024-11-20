@@ -12,6 +12,7 @@ from opencood.models.sub_modules.temporal_late_fusion import LateFusion
 from opencood.models.sub_modules.temporal_fusion_lstm import TemporalFusion_lstm
 import torch
 from opencood.models.sub_modules.torch_transformation_utils import warp_affine_simple
+from opencood.models.temporal_recovery.mask_model import TemporalMaskModel
 
 def transform_feature(feature_list,matrix_list,downsample_rate,discrete_ratio):
     B = len(feature_list[0])
@@ -40,9 +41,11 @@ def transform_feature(feature_list,matrix_list,downsample_rate,discrete_ratio):
     
     return temporal_list
 
-class PointPillarScope(nn.Module):
+class TemporalPointPillarScope(nn.Module):
     def __init__(self, args):
-        super(PointPillarScope, self).__init__()
+        super(TemporalPointPillarScope, self).__init__()
+
+        self.temporal_mask_model = TemporalMaskModel()
 
         # PIllar VFE
         self.pillar_vfe = PillarVFE(args['pillar_vfe'],
@@ -173,39 +176,29 @@ class PointPillarScope(nn.Module):
             matrix_list.append(pairwise_t_matrix)  
             regroup_feature_list.append(self.regroup(spatial_features_2d,record_len))  
             regroup_feature_list_large.append(self.regroup(spatial_features,record_len))
-    
-        # # TO DELETE
-        # import pickle
-        # import os
-        # to_pickle = {
-        #     'feature_list': [feature.cpu().detach().numpy() for feature in feature_list],
-        #     'feature_2d_list': [feature.cpu().detach().numpy() for feature in feature_2d_list],
-        #     'object_bbx_centers': [data['ego']['object_bbx_center'].cpu().detach().numpy() for data in data_dict_list],
-        #     'gt_object_ids_criteria': [data['ego']['object_detection_info_mapping'] for data in data_dict_list],
-        # }
-        # save_path = 'temporal_scope_features'
 
-        # os.makedirs(save_path, exist_ok=True)
+        # input temporal mask model
+        intermediate_results = dict(
+            feature_list=feature_list,
+            feature_2d_list=feature_2d_list
+        )
 
-        # # find lowest available index in save_path
-        # i = 0
-        # while os.path.exists(os.path.join(save_path, f'{i}.pkl')):
-        #     i += 1
-
-        # pkl_file = f'{i}.pkl'
-
-        # with open(os.path.join(save_path, pkl_file), 'wb') as f:
-        #     pickle.dump(to_pickle, f)
-        # # TO DELETE END
+        temporal_mask, temporal_masked_features = self.temporal_mask_model(
+            intermediate_results, data_dict_list
+        )
         
         pairwise_t_matrix = matrix_list[0].clone().detach()  
         if self.frame > 0: 
-            history_feature = transform_feature(regroup_feature_list_large,matrix_list,self.downsample_rate,self.discrete_ratio)
+            # history_feature = transform_feature(regroup_feature_list_large,matrix_list,self.downsample_rate,self.discrete_ratio)
             history_feature_2d = transform_feature(regroup_feature_list,matrix_list,self.downsample_rate,self.discrete_ratio)
             fusion_list = []
-            for b in range(len(history_feature)):
+            for b in range(len(history_feature_2d)):
                 fusion_list.append(self.temporal_fusion(history_feature_2d[b]))
             temporal_output = torch.cat(fusion_list,dim=0)  # B,C,H,W
+
+            # NEW: add output of temporal mask model
+            temporal_output = temporal_output + temporal_masked_features
+
             psm_temporal = self.cls_head(temporal_output)
             # rm_temporal = self.reg_head(temporal_output)        
         
@@ -213,7 +206,6 @@ class PointPillarScope(nn.Module):
         spatial_features_2d = feature_2d_list[0]
         batch_dict = batch_dict_list[0]
         record_len = batch_dict['record_len']
-        
         
         psm_single = self.cls_head(spatial_features_2d)
         rm_single = self.reg_head(spatial_features_2d)
@@ -266,10 +258,14 @@ class PointPillarScope(nn.Module):
         output_dict.update(result_dict)
         # print("communication rate:",communication_rates)
         
-        output_dict.update({'psm_single_v': psm_single_v,
-                       'psm_single_i': psm_single_i,
-                       'rm_single_v': rm_single_v,
-                       'rm_single_i': rm_single_i,
-                       'comm_rate': communication_rates
-                       })
+        output_dict.update({
+            'psm_single_v': psm_single_v,
+            'psm_single_i': psm_single_i,
+            'rm_single_v': rm_single_v,
+            'rm_single_i': rm_single_i,
+            'comm_rate': communication_rates,
+            'temporal_mask': temporal_mask,
+            'temporal_masked_features': temporal_masked_features
+        })
+
         return output_dict

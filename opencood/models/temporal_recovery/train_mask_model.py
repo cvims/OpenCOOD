@@ -13,7 +13,15 @@ from opencood.data_utils.datasets import build_dataset
 from opencood.tools import train_utils
 from opencood.utils import eval_utils
 from opencood.models.temporal_recovery.mask_model import TemporalMaskModel
-from opencood.models.temporal_recovery.scope_backbone import PointPillarScopeCut
+from opencood.models.temporal_recovery.scope_mask_model import TemporalPointPillarScope
+from opencood.loss.temporal_bce_loss import TemporalMaskBCELoss
+
+
+def create_temporal_result_stat_dict():
+    result_stat = {0.3: {'hits': 0, 'no_hits': 0},
+                   0.5: {'hits': 0, 'no_hits': 0},
+                   0.7: {'hits': 0, 'no_hits': 0}}
+    return result_stat
 
 
 def main():
@@ -22,6 +30,8 @@ def main():
     # runs/temporal_mask_model/{current_timestamp}
     timestamp = time.strftime('%Y%m%d%H%M%S', time.localtime())
     SAVE_PATH = os.path.join('runs', 'temporal_mask_model', timestamp)
+
+    os.makedirs(SAVE_PATH, exist_ok=True)
 
     TRAIN_DATA_PATH = '/data/public_datasets/OPV2V/original/train'
     VALIDATE_DATA_PATH = '/data/public_datasets/OPV2V/original/validate'
@@ -54,20 +64,19 @@ def main():
     hypes['train_params']['frame'] = TEMPORAL_STEPS - 1
     hypes['model']['args']['fusion_args']['frame'] = TEMPORAL_STEPS - 1
 
-
     use_scenarios_idx = None
 
     print('Dataset Building')
     opencood_dataset_train = build_dataset(
-        hypes, visualize=True, train=True,
+        hypes, visualize=False, train=True,
         use_scenarios_idx=use_scenarios_idx,
         preload_lidar_files=False
     )
 
     data_loader_train = DataLoader(
         opencood_dataset_train,
-        batch_size=2,
-        num_workers=1,
+        batch_size=1,
+        num_workers=16,
         collate_fn=opencood_dataset_train.collate_batch,
         shuffle=True,
         pin_memory=False,
@@ -77,7 +86,7 @@ def main():
     hypes['model']['args']['fusion_args']['communication_dropout'] = 0.0
 
     opencood_dataset_validate = build_dataset(
-        hypes, visualize=True, train=False,
+        hypes, visualize=False, train=False,
         use_scenarios_idx=use_scenarios_idx,
         preload_lidar_files=False
     )
@@ -85,7 +94,7 @@ def main():
     data_loader_validate = DataLoader(
         opencood_dataset_validate,
         batch_size=1,
-        num_workers=1,
+        num_workers=16,
         collate_fn=opencood_dataset_validate.collate_batch_test,
         shuffle=False,
         pin_memory=False,
@@ -93,7 +102,7 @@ def main():
     )
 
     print('Creating Model')
-    model = PointPillarScopeCut(hypes['model']['args'])
+    model = TemporalPointPillarScope(hypes['model']['args'])
     # we assume gpu is necessary
     if torch.cuda.is_available():
         model.cuda()
@@ -106,18 +115,25 @@ def main():
     if torch.cuda.is_available():
         model.to(device)
 
-    # create temporalmaskmodel
-    combined_model = TemporalMaskModel(model)
-
     if torch.cuda.is_available():
-        combined_model = combined_model.cuda()
-        combined_model.to(device)
+        model = model.cuda()
+        model.to(device)
+
+    # freeze model weights
+    for param in model.parameters():
+        param.requires_grad = False
+    
+    # unfreeze model.temporal_mask_model
+    for param in model.temporal_mask_model.parameters():
+        param.requires_grad = True
 
     # optimizer setup
-    optimizer = train_utils.setup_optimizer(hypes, combined_model)
+    optimizer = train_utils.setup_optimizer(hypes, model)
     # lr scheduler setup
     num_steps = len(data_loader_train)
     scheduler = train_utils.setup_lr_schedular(hypes, optimizer, num_steps)
+
+    mask_model_criterion = TemporalMaskBCELoss(hypes, pos_weight=50.0, neg_weight=1.0)
 
     for epoch in range(EPOCHS):
         scheduler.step(epoch)
@@ -128,8 +144,9 @@ def main():
 
         for i, batch_data_list in enumerate(data_loader_train):
             # the model will be evaluation mode during validation
-            combined_model.train()
-            combined_model.zero_grad()
+            model.eval()
+            model.temporal_mask_model.train()
+            model.zero_grad()
             optimizer.zero_grad()
 
             batch_data = batch_data_list[-1]
@@ -137,26 +154,78 @@ def main():
             batch_data_list = train_utils.to_device(batch_data_list, device)
             batch_data = train_utils.to_device(batch_data, device)
 
-            output_dict = combined_model(batch_data_list)
+            output = model(batch_data_list)
 
-            # final_loss = 
+            final_loss = mask_model_criterion(
+                output['temporal_mask'],
+                batch_data['ego']['object_bbx_center'],
+                batch_data['ego']['object_detection_info_mapping']
+            )
 
+            mask_model_criterion.logging(epoch, i, len(data_loader_train), None, pbar=pbar_train)
             pbar_train.update(1)
 
-            # final_loss.backward()
+            final_loss.backward()
             optimizer.step()
 
             if hypes['lr_scheduler']['core_method'] == 'cosineannealwarm':
                 scheduler.step_update(epoch * num_steps + i)
 
+
         if epoch % hypes['train_params']['save_freq'] == 0:
-            torch.save(combined_model.state_dict(),
+            torch.save(model.state_dict(),
                 os.path.join(SAVE_PATH, 'net_epoch%d.pth' % (epoch + 1)))
         
 
-        # TODO EVALUATION LOOP
+        if epoch % hypes['train_params']['eval_freq'] == 0:
+            valid_ave_loss = []
+            temporal_result_stats = create_temporal_result_stat_dict()
+
+            pbar_val = tqdm.tqdm(total=len(data_loader_validate), leave=True)
+            with torch.no_grad():
+                for batch_data_list in enumerate(data_loader_validate):
+                    model.eval()
+                    model.temporal_mask_model.eval()
+
+                    batch_data = batch_data_list[-1]
+                    batch_data_list = train_utils.to_device(batch_data_list, device)
+                    batch_data = train_utils.to_device(batch_data, device)
+
+                    output = model(batch_data_list)
+
+                    final_loss = mask_model_criterion(
+                        output['temporal_mask'],
+                        batch_data['ego']['object_bbx_center'],
+                        batch_data['ego']['object_detection_info_mapping']
+                    )
+
+                    valid_ave_loss.append(final_loss.item())
+
+                    # temporal evaluation
+                    pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids = \
+                    opencood_dataset_validate.post_process(batch_data, {'ego': output})
+
+                    _, gt_object_ids = opencood_dataset_validate.post_processor.generate_gt_bbx(batch_data)
+                    gt_object_ids_criteria = batch_data['ego']['object_detection_info_mapping'][-1]
+                    gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
+
+                    for iou_thre in [0.3, 0.5, 0.7]:
+                        eval_utils.calculate_temporal_recovered_hits(
+                            pred_box_tensor,
+                            pred_score,
+                            gt_box_tensor,
+                            temporal_result_stats,
+                            iou_thre,
+                            gt_object_ids_criteria)
+
+                    pbar_val.update(1)
             
-        
+            valid_ave_loss = statistics.mean(valid_ave_loss)
+            print('At epoch %d, the validation loss is %f' % (epoch,
+                                                              valid_ave_loss))
+            print('At epoch %d, the temporal evaluation is %s' % (epoch,
+                                                              temporal_result_stats))
+
 
 if __name__ == '__main__':
     main()
