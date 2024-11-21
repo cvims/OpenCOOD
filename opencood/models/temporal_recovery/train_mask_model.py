@@ -15,6 +15,7 @@ from opencood.utils import eval_utils
 from opencood.models.temporal_recovery.mask_model import TemporalMaskModel
 from opencood.models.temporal_recovery.scope_mask_model import TemporalPointPillarScope
 from opencood.loss.temporal_bce_loss import TemporalMaskBCELoss
+from opencood.loss.temporal_point_pillar_loss import TemporalPointPillarLoss
 
 
 def create_temporal_result_stat_dict():
@@ -44,7 +45,7 @@ def main():
     
     TEMPORAL_STEPS = 4
     TEMPORAL_EGO_ONLY = False
-    COMMUNICATION_DROPOUT = 0.25
+    COMMUNICATION_DROPOUT = 0.5
 
     hypes = yaml_utils.load_yaml(HYPES_YAML_FILE, None)
 
@@ -65,6 +66,9 @@ def main():
     hypes['model']['args']['fusion_args']['frame'] = TEMPORAL_STEPS - 1
 
     use_scenarios_idx = None
+    use_scenarios_idx = [
+        0, 5, 11, 14, 22, 24, 35, 40, 41, 42
+    ]
 
     print('Dataset Building')
     opencood_dataset_train = build_dataset(
@@ -87,14 +91,14 @@ def main():
 
     opencood_dataset_validate = build_dataset(
         hypes, visualize=False, train=False,
-        use_scenarios_idx=use_scenarios_idx,
+        # use_scenarios_idx=use_scenarios_idx,
         preload_lidar_files=False
     )
 
     data_loader_validate = DataLoader(
         opencood_dataset_validate,
         batch_size=1,
-        num_workers=16,
+        num_workers=8,
         collate_fn=opencood_dataset_validate.collate_batch_test,
         shuffle=False,
         pin_memory=False,
@@ -133,10 +137,17 @@ def main():
     num_steps = len(data_loader_train)
     scheduler = train_utils.setup_lr_schedular(hypes, optimizer, num_steps)
 
-    mask_model_criterion = TemporalMaskBCELoss(hypes, pos_weight=50.0, neg_weight=1.0)
+    mask_model_criterion = TemporalMaskBCELoss(
+        hypes,
+        pos_weight=100.0,
+        neg_weight=1.0
+    )
+
+    hypes['loss']['args']['temporal_cls_weight'] = 1.0
+    hypes['loss']['args']['temporal_reg'] = 5.0
+    scope_default_criterion = TemporalPointPillarLoss(hypes['loss']['args'])
 
     for epoch in range(EPOCHS):
-        scheduler.step(epoch)
         for param_group in optimizer.param_groups:
             print('learning rate %.7f' % param_group["lr"])
 
@@ -146,6 +157,9 @@ def main():
             # the model will be evaluation mode during validation
             model.eval()
             model.temporal_mask_model.train()
+            model.late_fusion.train()
+            model.cls_head.train()
+            model.reg_head.train()
             model.zero_grad()
             optimizer.zero_grad()
 
@@ -156,17 +170,29 @@ def main():
 
             output = model(batch_data_list)
 
-            final_loss = mask_model_criterion(
+            mask_model_loss = mask_model_criterion(
                 output['temporal_mask'],
                 batch_data['ego']['object_bbx_center'],
                 batch_data['ego']['object_detection_info_mapping']
             )
 
-            mask_model_criterion.logging(epoch, i, len(data_loader_train), None, pbar=pbar_train)
+            scope_loss = scope_default_criterion(
+                output,
+                batch_data['ego']['label_dict'],
+                batch_data['ego']['temporal_label_dict']
+            )
+
+            final_loss = mask_model_loss + scope_loss
+            # final_loss = scope_loss
+
+            # mask_model_criterion.logging(epoch, i, len(data_loader_train), None, pbar=pbar_train)
+            scope_default_criterion.logging(epoch, i, len(data_loader_train), None, pbar=pbar_train)
+
             pbar_train.update(1)
 
             final_loss.backward()
             optimizer.step()
+            scheduler.step(epoch)
 
             if hypes['lr_scheduler']['core_method'] == 'cosineannealwarm':
                 scheduler.step_update(epoch * num_steps + i)
@@ -183,23 +209,33 @@ def main():
 
             pbar_val = tqdm.tqdm(total=len(data_loader_validate), leave=True)
             with torch.no_grad():
-                for batch_data_list in enumerate(data_loader_validate):
+                for batch_data_list in data_loader_validate:
                     model.eval()
                     model.temporal_mask_model.eval()
+                    model.late_fusion.eval()
+                    model.cls_head.eval()
+                    model.reg_head.eval()
 
                     batch_data = batch_data_list[-1]
+
                     batch_data_list = train_utils.to_device(batch_data_list, device)
                     batch_data = train_utils.to_device(batch_data, device)
 
                     output = model(batch_data_list)
 
-                    final_loss = mask_model_criterion(
-                        output['temporal_mask'],
-                        batch_data['ego']['object_bbx_center'],
-                        batch_data['ego']['object_detection_info_mapping']
+                    # mask_model_loss = mask_model_criterion(
+                    #     output['temporal_mask'],
+                    #     batch_data['ego']['object_bbx_center'],
+                    #     batch_data['ego']['object_detection_info_mapping']
+                    # )
+
+                    scope_loss = scope_default_criterion(
+                        output,
+                        batch_data['ego']['label_dict'],
+                        batch_data['ego']['temporal_label_dict']
                     )
 
-                    valid_ave_loss.append(final_loss.item())
+                    valid_ave_loss.append(scope_loss.item())
 
                     # temporal evaluation
                     pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids = \

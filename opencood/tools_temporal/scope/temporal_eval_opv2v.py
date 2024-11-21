@@ -13,6 +13,7 @@ from opencood.tools import train_utils, inference_utils
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.data_utils.datasets import build_dataset
 from opencood.utils import eval_utils
+from opencood.models.temporal_recovery.scope_mask_model import TemporalPointPillarScope
 
 
 def create_result_stat_dict():
@@ -32,16 +33,18 @@ def create_temporal_result_stat_dict():
 def main():
     eval_utils.set_random_seed(0)
 
-    DATA_PATH = '/data/public_datasets/OPV2V/original/train'
+    DATA_PATH = '/data/public_datasets/OPV2V/original/test'
 
     MODEL_DIRS = [
-        r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V',
+        # r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/scope/point_pillar_scope_more_steps_all_cavs_2024_11_12_19_54_32',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/202411131117',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/scope_temporal_4_steps_2024_11_15_11_50_15'
+        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121125726'
     ]
 
-    HYPES_YAML_FILES = [os.path.join(model_dir, 'config.yaml') for model_dir in MODEL_DIRS]
+    # HYPES_YAML_FILES = [os.path.join(model_dir, 'config.yaml') for model_dir in MODEL_DIRS]
+    HYPES_YAML_FILES = [r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V/config.yaml']
 
     # STANDARD SCOPE SETTING: Temporal steps = 2; Temporal ego only: True
 
@@ -90,7 +93,8 @@ def main():
             drop_last=False)
 
         print('Creating Model')
-        model = train_utils.create_model(hypes)
+        # model = train_utils.create_model(hypes)
+        model = TemporalPointPillarScope(hypes['model']['args'])
         # we assume gpu is necessary
         if torch.cuda.is_available():
             model.cuda()
@@ -113,7 +117,7 @@ def main():
                                                                     model,
                                                                     opencood_dataset)
             
-                gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
+                gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping'][-1]
                 gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
 
                 # standard evaluation

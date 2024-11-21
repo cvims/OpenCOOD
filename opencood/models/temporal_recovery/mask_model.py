@@ -11,11 +11,13 @@ class TemporalMaskModel(torch.nn.Module):
         self.cav_fusion = self.build_cav_fusion()
         self.historical_fusion = self.build_historical_fusion()
         self.mask_model = self.build_mask_model()
+        self.output_layer = self.build_output_layer()
 
     def build_cav_fusion(self):
         # Conv layer (keep dimensions) [timesteps * CAVs, 64, 200, 704]
         cav_fusion = torch.nn.Sequential(
             torch.nn.Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+            torch.nn.BatchNorm2d(256),
             torch.nn.ReLU()
         )
 
@@ -25,6 +27,7 @@ class TemporalMaskModel(torch.nn.Module):
         # Conv layer (keep dimensions) [timesteps, 64, 200, 704]
         hist_fusion = torch.nn.Sequential(
             torch.nn.Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+            torch.nn.BatchNorm2d(256),
             torch.nn.ReLU()
         )
 
@@ -33,10 +36,22 @@ class TemporalMaskModel(torch.nn.Module):
     def build_mask_model(self):
         mask_model = torch.nn.Sequential(
             torch.nn.Conv2d(256, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+            torch.nn.BatchNorm2d(64),
+            torch.nn.ReLU(),
             torch.nn.Conv2d(64, 1, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+            torch.nn.BatchNorm2d(1),
             torch.nn.Sigmoid(),
         )
         return mask_model
+
+    def build_output_layer(self):
+        output_layer = torch.nn.Sequential(
+            torch.nn.Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+            torch.nn.BatchNorm2d(256),
+            torch.nn.ReLU()
+        )
+
+        return output_layer
     
     def regroup(self, feature_batched, cavs_per_timestamps):
         feature_list = []
@@ -81,15 +96,15 @@ class TemporalMaskModel(torch.nn.Module):
             feature_list_bs = [feature_list[i+1][bs] for i in range(timesteps-1)]
             # max pooling across the timesteps
             hist_fusion = torch.max(torch.stack(feature_list_bs, dim=0), dim=0)[0]
-            # hist_fusion = self.historical_fusion(hist_fusion)
             hist_fusion_l.append(hist_fusion)
             # subtract all historical features from the latest timestep
             feature_sub_list = [feature_list[bs][0] - feature_list[i+1][bs] for i in range(timesteps-1)]
-            feature_sub_list = torch.max(torch.stack(feature_sub_list, dim=0), dim=0)[0]
+            feature_sub_list = torch.min(torch.stack(feature_sub_list, dim=0), dim=0)[0]
             feature_sub_list_bs.append(feature_sub_list)
 
         hist_fusion_output = torch.stack(hist_fusion_l, dim=0)
-        feature_sub_list_output = torch.stack(feature_sub_list_bs, dim=0)        
+        hist_fusion_output = self.historical_fusion(hist_fusion_output)
+        feature_sub_list_output = torch.stack(feature_sub_list_bs, dim=0)
 
         # todo flow model
 
@@ -98,8 +113,21 @@ class TemporalMaskModel(torch.nn.Module):
         # mask_output = self.mask_model(hist_fusion_output - feature_list[0])
         mask_output = self.mask_model(feature_sub_list_output)
 
-        # mask_hist_fusion = hist_fusion_output * mask_output
+        mask_hist_fusion = hist_fusion_output * mask_output
+
+        mask_hist_fusion = self.output_layer(mask_hist_fusion)
 
         mask_output = torch.squeeze(mask_output, dim=1)
 
-        return mask_output, 0 #mask_hist_fusion
+        if sum([v['temporal_recovered'] for v in data_dict_list[0]['ego']['object_detection_info_mapping'][0].values()]) > 0:
+            print('hier')
+            from opencood.loss.temporal_bce_loss import TemporalMaskBCELoss
+
+            bce_loss = TemporalMaskBCELoss(None)
+            bce_loss(
+                mask_output,
+                data_dict_list[0]['ego']['object_bbx_center'],
+                data_dict_list[0]['ego']['object_detection_info_mapping']
+            )
+
+        return mask_output, mask_hist_fusion

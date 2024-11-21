@@ -31,7 +31,7 @@ def main():
     set_random_seed(0)
 
     HYPES_YAML_FILE = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V/config.yaml'
-    TEMPORAL_STEPS = 2
+    TEMPORAL_STEPS = 4
 
     SPLIT = 'train'  # 'train', 'validate', 'test'
 
@@ -47,14 +47,14 @@ def main():
     print('Dataset Building')
     opencood_dataset = build_dataset(
         hypes, visualize=True, train=False,
-        use_scenarios_idx=[0],
+        # use_scenarios_idx=[0],
     )
     print(f"{len(opencood_dataset)} samples found.")
 
     data_loader = DataLoader(
         opencood_dataset,
         batch_size=1,
-        num_workers=1,
+        num_workers=16,
         collate_fn=opencood_dataset.collate_batch_test,
         shuffle=False,
         pin_memory=False,
@@ -70,7 +70,7 @@ def main():
 
         _, gt_object_ids = inference_temporal_potential(opencood_dataset, batch_data[-1])
 
-        gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping']
+        gt_object_ids_criteria = batch_data[-1]['ego']['object_detection_info_mapping'][-1]
         gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
 
         for j, len_record in enumerate(len_records):

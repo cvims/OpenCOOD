@@ -296,7 +296,8 @@ class TemporalPointPillarLoss(nn.Module):
                       total_loss.item(), conf_loss.item(), reg_loss.item()))
 
 
-        writer.add_scalar('Regression_loss', reg_loss.item(),
-                          epoch*batch_len + batch_id)
-        writer.add_scalar('Confidence_loss', conf_loss.item(),
-                          epoch*batch_len + batch_id)
+        if writer:
+            writer.add_scalar('Regression_loss', reg_loss.item(),
+                            epoch*batch_len + batch_id)
+            writer.add_scalar('Confidence_loss', conf_loss.item(),
+                            epoch*batch_len + batch_id)
