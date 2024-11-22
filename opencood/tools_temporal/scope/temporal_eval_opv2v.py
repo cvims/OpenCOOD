@@ -40,7 +40,8 @@ def main():
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/scope/point_pillar_scope_more_steps_all_cavs_2024_11_12_19_54_32',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/202411131117',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/scope_temporal_4_steps_2024_11_15_11_50_15'
-        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121125726'
+        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121125726',
+        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121210112'
     ]
 
     # HYPES_YAML_FILES = [os.path.join(model_dir, 'config.yaml') for model_dir in MODEL_DIRS]
@@ -50,6 +51,7 @@ def main():
 
     TEMPORAL_STEPS = 4
     TEMPORAL_EGO_ONLY = False
+    COMMUNICATION_DROPOUT = 0.25
     
     print(f'Eval for all models with configs: temporal steps = {TEMPORAL_STEPS}, temporal ego only = {TEMPORAL_EGO_ONLY}')
 
@@ -61,6 +63,7 @@ def main():
 
         hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
         hypes['fusion']['args']['temporal_ego_only'] = TEMPORAL_EGO_ONLY
+        hypes['fusion']['args']['communication_dropout'] = COMMUNICATION_DROPOUT
 
         hypes['model']['args']['fusion_args']['communication']['thre'] = 0
         hypes['postprocess']['target_args']['score_threshold'] = 0.23

@@ -14,6 +14,7 @@ import torch
 from opencood.models.sub_modules.torch_transformation_utils import warp_affine_simple
 from opencood.models.temporal_recovery.mask_model import TemporalMaskModel
 from opencood.models.temporal_recovery.mask_model2 import TemporalMaskModelAttention
+from opencood.models.temporal_recovery.attn_mask_model import SpatialTemporalMaskModelAttention
 from opencood.visualization.vis_utils import plot_feature_map
 
 def transform_feature(feature_list,matrix_list,downsample_rate,discrete_ratio):
@@ -47,7 +48,23 @@ class TemporalPointPillarScope(nn.Module):
     def __init__(self, args):
         super(TemporalPointPillarScope, self).__init__()
 
-        self.temporal_mask_model = TemporalMaskModelAttention()
+        # New
+        self.temporal_mask_model = SpatialTemporalMaskModelAttention()
+        self.temporal_adaption = nn.Sequential(
+            nn.Conv2d(
+                in_channels=256, out_channels=256, kernel_size=3, stride=1, padding=1
+            ),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+        )
+
+        self.temporal_mask_fusion = nn.Sequential(
+                nn.Conv2d(
+                in_channels=512, out_channels=256, kernel_size=3, stride=1, padding=1
+            ),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+        )
 
         # PIllar VFE
         self.pillar_vfe = PillarVFE(args['pillar_vfe'],
@@ -188,6 +205,7 @@ class TemporalPointPillarScope(nn.Module):
         temporal_mask, temporal_masked_features = self.temporal_mask_model(
             intermediate_results, data_dict_list
         )
+
         # temporal_masked_features = self.temporal_mask_model(
         #     intermediate_results, data_dict_list
         # )
@@ -197,6 +215,8 @@ class TemporalPointPillarScope(nn.Module):
 
         # repeat binary mask at channel dim
         # binary_temporal_mask = binary_temporal_mask.unsqueeze(1).repeat(1, feature_2d_list[0].shape[1], 1, 1)
+
+        temporal_masked_features = self.temporal_adaption(temporal_masked_features)
         
         pairwise_t_matrix = matrix_list[0].clone().detach()  
         if self.frame > 0: 
@@ -207,16 +227,7 @@ class TemporalPointPillarScope(nn.Module):
                 fusion_list.append(self.temporal_fusion(history_feature_2d[b]))
             temporal_output = torch.cat(fusion_list,dim=0)  # B,C,H,W
 
-            # NEW: add output of temporal mask model
-            # temporal_output = torch.mean(torch.stack([temporal_output, temporal_masked_features]), dim=0)
-            # add the temporal masked features exactly at the position of the temporal mask
-            # temporal_output[binary_temporal_mask] = temporal_masked_features[binary_temporal_mask]
-
-            # Idee: Alles von temporal_masked_features muss 0 sein,
-            # nur die Stellen an denen temporal_masked_features ein temporal vehicle hat, sind höher als 0
-            temporal_output = temporal_output - temporal_masked_features
-            # relu
-            temporal_output = torch.relu(temporal_output)
+            temporal_output = self.temporal_mask_fusion(torch.cat([temporal_output,temporal_masked_features],dim=1))
 
             psm_temporal = self.cls_head(temporal_output)
             # rm_temporal = self.reg_head(temporal_output)        
@@ -238,7 +249,7 @@ class TemporalPointPillarScope(nn.Module):
                                             [self.shrink_conv, self.cls_head, self.reg_head])
             if self.shrink_flag:
                 fused_feature = self.shrink_conv(fused_feature)
-        else: 
+        else:
             fused_feature, communication_rates, result_dict = self.fusion_net(spatial_features_2d,
                                             psm_single,
                                             record_len,

@@ -54,7 +54,7 @@ def main():
 
     hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
     hypes['fusion']['args']['temporal_ego_only'] = TEMPORAL_EGO_ONLY
-    hypes['model']['args']['fusion_args']['communication_dropout'] = COMMUNICATION_DROPOUT
+    hypes['fusion']['args']['communication_dropout'] = COMMUNICATION_DROPOUT
 
     hypes['model']['args']['fusion_args']['communication']['thre'] = 0
     hypes['postprocess']['target_args']['score_threshold'] = 0.23
@@ -87,7 +87,7 @@ def main():
         drop_last=False
     )
 
-    hypes['model']['args']['fusion_args']['communication_dropout'] = 0.0
+    hypes['fusion']['args']['communication_dropout'] = 0.0
 
     opencood_dataset_validate = build_dataset(
         hypes, visualize=False, train=False,
@@ -144,7 +144,7 @@ def main():
     )
 
     hypes['loss']['args']['temporal_cls_weight'] = 1.0
-    hypes['loss']['args']['temporal_reg'] = 5.0
+    hypes['loss']['args']['temporal_reg'] = 10.0
     scope_default_criterion = TemporalPointPillarLoss(hypes['loss']['args'])
 
     for epoch in range(EPOCHS):
@@ -170,11 +170,11 @@ def main():
 
             output = model(batch_data_list)
 
-            mask_model_loss = mask_model_criterion(
-                output['temporal_mask'],
-                batch_data['ego']['object_bbx_center'],
-                batch_data['ego']['object_detection_info_mapping']
-            )
+            # mask_model_loss = mask_model_criterion(
+            #     output['temporal_mask'],
+            #     batch_data['ego']['object_bbx_center'],
+            #     batch_data['ego']['object_detection_info_mapping']
+            # )
 
             scope_loss = scope_default_criterion(
                 output,
@@ -182,8 +182,8 @@ def main():
                 batch_data['ego']['temporal_label_dict']
             )
 
-            final_loss = mask_model_loss + scope_loss
-            # final_loss = scope_loss
+            # final_loss = mask_model_loss + scope_loss
+            final_loss = scope_loss
 
             # mask_model_criterion.logging(epoch, i, len(data_loader_train), None, pbar=pbar_train)
             scope_default_criterion.logging(epoch, i, len(data_loader_train), None, pbar=pbar_train)
