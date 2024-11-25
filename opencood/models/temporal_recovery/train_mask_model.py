@@ -13,7 +13,8 @@ from opencood.data_utils.datasets import build_dataset
 from opencood.tools import train_utils
 from opencood.utils import eval_utils
 from opencood.models.temporal_recovery.mask_model import TemporalMaskModel
-from opencood.models.temporal_recovery.scope_mask_model import TemporalPointPillarScope
+# from opencood.models.temporal_recovery.scope_mask_model import TemporalPointPillarScope
+from opencood.models.temporal_recovery.scope_new_temporal_model import TemporalPointPillarScope
 from opencood.loss.temporal_bce_loss import TemporalMaskBCELoss
 from opencood.loss.temporal_point_pillar_loss import TemporalPointPillarLoss
 
@@ -79,7 +80,7 @@ def main():
 
     data_loader_train = DataLoader(
         opencood_dataset_train,
-        batch_size=1,
+        batch_size=2,
         num_workers=16,
         collate_fn=opencood_dataset_train.collate_batch,
         shuffle=True,
@@ -98,7 +99,7 @@ def main():
     data_loader_validate = DataLoader(
         opencood_dataset_validate,
         batch_size=1,
-        num_workers=8,
+        num_workers=1,
         collate_fn=opencood_dataset_validate.collate_batch_test,
         shuffle=False,
         pin_memory=False,

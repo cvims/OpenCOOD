@@ -15,6 +15,8 @@ from opencood.utils.temporal_utils import filter_vehicles_by_category, \
 from opencood.utils import box_utils
 from opencood.data_utils.datasets.temporal.lidar.base_temporal_lidar_dataset import BaseTemporalLidarDataset
 
+from opencood.utils import eval_utils
+
 
 class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
     def __init__(
@@ -127,6 +129,9 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                     selected_cav_processed = selected_cav_processed_ego
                 elif selected_cav_base['ego'] is False:
                     selected_cav_processed = self.get_item_single_car(selected_cav_base, ego_lidar_pose)
+                    if selected_cav_processed['projected_lidar'].shape[0] == 0:
+                        # no lidar points in range of ego
+                        continue
                 else:
                     raise NotImplementedError('Ego has to be the first vehicle in the scenario.')
 
@@ -473,6 +478,10 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                 self.pre_processor.collate_batch(merged_feature_dict)
             # [2, 3, 4, ..., M]
             record_len = torch.from_numpy(np.array(record_len, dtype=int))
+
+            coords = processed_lidar_torch_dict['voxel_coords']
+            if record_len.sum() != (coords[:, 0].max().int().item() + 1):
+                raise ValueError("Record length does not match the processed lidar's length.")
             label_torch_dict = \
                 self.post_processor.collate_batch(label_dict_list)
             temporal_label_torch_dict = \
@@ -624,15 +633,25 @@ if __name__ == '__main__':
     import torch
     import tqdm
     import time
-    from multiprocessing import Manager
+
+    eval_utils.set_random_seed(0)
+
+    use_scenarios_idx = [
+        0, 5, 11, 14, 22, 24, 35, 40, 41, 42
+    ]
 
     config_file = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/aaa_test_lidar.yaml'
     params = load_yaml(config_file)
 
-    params['root_dir'] = '/data/public_datasets/OPV2V/original/test'
+    params['root_dir'] = '/data/public_datasets/OPV2V/original/train'
+
+    params['fusion']['args']['queue_length'] = 4
+    params['fusion']['args']['temporal_ego_only'] = False
+    # params['fusion']['args']['communication_dropout'] = 0.7
 
     dataset = TemporalLidarIntermediateFusionDataset(
         params, visualize=False, train=True, validate=False,
+        use_scenarios_idx=use_scenarios_idx,
         preload_lidar_files=True)
 
     dataloader = torch.utils.data.DataLoader(
@@ -640,29 +659,30 @@ if __name__ == '__main__':
         batch_size=1,
         shuffle=False,
         collate_fn=dataset.collate_batch,
-        num_workers=8)
+        num_workers=16)
 
     _start_time = time.time()
     for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
-        if i == 500:
-            break
+        # if i == 500:
+        #     break
+        pass
     _end_time = time.time()
     print(f"Time: {_end_time - _start_time}")
 
-    dataset = TemporalLidarIntermediateFusionDataset(
-        params, visualize=False, train=True, validate=False,
-        preload_lidar_files=False)
+    # dataset = TemporalLidarIntermediateFusionDataset(
+    #     params, visualize=False, train=True, validate=False,
+    #     preload_lidar_files=False)
 
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=1,
-        shuffle=False,
-        collate_fn=dataset.collate_batch,
-        num_workers=8)
+    # dataloader = torch.utils.data.DataLoader(
+    #     dataset,
+    #     batch_size=1,
+    #     shuffle=False,
+    #     collate_fn=dataset.collate_batch,
+    #     num_workers=8)
 
-    _start_time = time.time()
-    for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
-        if i == 500:
-            break
-    _end_time = time.time()
-    print(f"Time: {_end_time - _start_time}")
+    # _start_time = time.time()
+    # for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
+    #     if i == 500:
+    #         break
+    # _end_time = time.time()
+    # print(f"Time: {_end_time - _start_time}")

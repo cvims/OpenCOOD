@@ -41,7 +41,8 @@ def main():
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/202411131117',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/scope_temporal_4_steps_2024_11_15_11_50_15'
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121125726',
-        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121210112'
+        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121210112',
+        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241125154956'
     ]
 
     # HYPES_YAML_FILES = [os.path.join(model_dir, 'config.yaml') for model_dir in MODEL_DIRS]
@@ -89,7 +90,7 @@ def main():
         data_loader = DataLoader(
             opencood_dataset,
             batch_size=1,
-            num_workers=1,
+            num_workers=16,
             collate_fn=opencood_dataset.collate_batch_test,
             shuffle=False,
             pin_memory=False,

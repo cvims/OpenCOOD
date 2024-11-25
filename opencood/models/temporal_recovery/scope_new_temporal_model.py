@@ -12,9 +12,7 @@ from opencood.models.sub_modules.temporal_late_fusion import LateFusion
 from opencood.models.sub_modules.temporal_fusion_lstm import TemporalFusion_lstm
 import torch
 from opencood.models.sub_modules.torch_transformation_utils import warp_affine_simple
-from opencood.models.temporal_recovery.mask_model import TemporalMaskModel
-from opencood.models.temporal_recovery.mask_model2 import TemporalMaskModelAttention
-from opencood.models.temporal_recovery.attn_mask_model import SpatialTemporalMaskModelAttention
+from opencood.models.temporal_recovery.jeremias_attn import CustomSpatialTemporalTransformer
 from opencood.visualization.vis_utils import plot_feature_map
 
 def transform_feature(feature_list,matrix_list,downsample_rate,discrete_ratio):
@@ -44,12 +42,32 @@ def transform_feature(feature_list,matrix_list,downsample_rate,discrete_ratio):
     
     return temporal_list
 
+
 class TemporalPointPillarScope(nn.Module):
     def __init__(self, args):
         super(TemporalPointPillarScope, self).__init__()
 
+        self.fusion_net = SCOPE(args['fusion_args'])
+        self.frame = args['fusion_args']['frame']
+        self.discrete_ratio = args['fusion_args']['voxel_size'][0]  # voxel_size[0]=0.4    
+        self.downsample_rate = args['fusion_args']['downsample_rate']  # 2/4, downsample rate from original feature map [200, 704]
+        self.temporal_fusion = TemporalFusion_lstm(args['fusion_args'])
+        self.late_fusion = LateFusion(args['fusion_args']['communication'])
+        self.multi_scale = args['fusion_args']['multi_scale']
+
+        embedding_dim = 352
+        tensor_size = (256, 100, embedding_dim)
+        sequence_length = 4
+        patch_size = (32, 25, 32)
+
         # New
-        self.temporal_mask_model = SpatialTemporalMaskModelAttention()
+        self.temporal_mask_model = CustomSpatialTemporalTransformer(
+            tensor_size=tensor_size,
+            patch_size=patch_size,
+            embedding_dim=embedding_dim,
+            sequence_length=sequence_length
+        )
+
         self.temporal_adaption = nn.Sequential(
             nn.Conv2d(
                 in_channels=256, out_channels=256, kernel_size=3, stride=1, padding=1
@@ -102,14 +120,6 @@ class TemporalPointPillarScope(nn.Module):
         if 'dcn' in args:
             self.dcn = True
             self.dcn_net = DCNNet(args['dcn'])
-
-        self.fusion_net = SCOPE(args['fusion_args'])
-        self.frame = args['fusion_args']['frame']
-        self.discrete_ratio = args['fusion_args']['voxel_size'][0]  # voxel_size[0]=0.4    
-        self.downsample_rate = args['fusion_args']['downsample_rate']  # 2/4, downsample rate from original feature map [200, 704]
-        self.temporal_fusion = TemporalFusion_lstm(args['fusion_args'])
-        self.late_fusion = LateFusion(args['fusion_args']['communication'])
-        self.multi_scale = args['fusion_args']['multi_scale']
 
         self.cls_head = nn.Conv2d(128 * 2, args['anchor_number'],
                                   kernel_size=1)
@@ -198,43 +208,7 @@ class TemporalPointPillarScope(nn.Module):
             feature_2d_list.append(spatial_features_2d)
             matrix_list.append(pairwise_t_matrix)  
             regroup_feature_list.append(self.regroup(spatial_features_2d,record_len))  
-            regroup_feature_list_large.append(self.regroup(spatial_features,record_len))
-
-        # input temporal mask model
-        intermediate_results = dict(
-            feature_list=feature_list,
-            feature_2d_list=feature_2d_list
-        )
-
-        temporal_mask, temporal_masked_features = self.temporal_mask_model(
-            intermediate_results, data_dict_list
-        )
-
-        # temporal_masked_features = self.temporal_mask_model(
-        #     intermediate_results, data_dict_list
-        # )
-
-        # make mask binary
-        # binary_temporal_mask = temporal_mask > 0.2
-
-        # repeat binary mask at channel dim
-        # binary_temporal_mask = binary_temporal_mask.unsqueeze(1).repeat(1, feature_2d_list[0].shape[1], 1, 1)
-
-        temporal_masked_features = self.temporal_adaption(temporal_masked_features)
-        
-        pairwise_t_matrix = matrix_list[0].clone().detach()  
-        if self.frame > 0: 
-            # history_feature = transform_feature(regroup_feature_list_large,matrix_list,self.downsample_rate,self.discrete_ratio)
-            history_feature_2d = transform_feature(regroup_feature_list,matrix_list,self.downsample_rate,self.discrete_ratio)
-            fusion_list = []
-            for b in range(len(history_feature_2d)):
-                fusion_list.append(self.temporal_fusion(history_feature_2d[b]))
-            temporal_output = torch.cat(fusion_list,dim=0)  # B,C,H,W
-
-            temporal_output = self.temporal_mask_fusion(torch.cat([temporal_output,temporal_masked_features],dim=1))
-
-            psm_temporal = self.cls_head(temporal_output)
-            # rm_temporal = self.reg_head(temporal_output)        
+            regroup_feature_list_large.append(self.regroup(spatial_features,record_len))     
         
         spatial_features = feature_list[0]
         spatial_features_2d = feature_2d_list[0]
@@ -244,6 +218,7 @@ class TemporalPointPillarScope(nn.Module):
         psm_single = self.cls_head(spatial_features_2d)
         rm_single = self.reg_head(spatial_features_2d)
 
+        pairwise_t_matrix = matrix_list[0].clone().detach()  
         if self.multi_scale:
             fused_feature, communication_rates, result_dict = self.fusion_net(spatial_features,
                                             psm_single,
@@ -277,6 +252,47 @@ class TemporalPointPillarScope(nn.Module):
         
         psm_cross = self.cls_head(fused_feature)
         rm_cross = self.reg_head(fused_feature)
+
+
+        ### Get all features instead of only the current frame features (default SCOPE)
+        fused_features = [fused_feature.unsqueeze(dim=1)] # current frame already processed
+
+        for i in range(1, len(data_dict_list)):
+            spatial_features = feature_list[i]
+            spatial_features_2d = feature_2d_list[i]
+            batch_dict = batch_dict_list[i]
+            record_len = batch_dict['record_len']
+            psm_single = self.cls_head(spatial_features_2d)
+            rm_single = self.reg_head(spatial_features_2d)
+            pairwise_t_matrix = matrix_list[i].clone().detach()
+
+            if self.multi_scale:
+                fused_feature, communication_rates, result_dict = self.fusion_net(spatial_features,
+                                                psm_single,
+                                                record_len,
+                                                pairwise_t_matrix, 
+                                                self.backbone,
+                                                [self.shrink_conv, self.cls_head, self.reg_head])
+                if self.shrink_flag:
+                    fused_feature = self.shrink_conv(fused_feature)
+            else:
+                fused_feature, communication_rates, result_dict = self.fusion_net(spatial_features_2d,
+                                                psm_single,
+                                                record_len,
+                                                pairwise_t_matrix)
+
+            fused_features.append(fused_feature.unsqueeze(dim=1))
+
+        fused_features = torch.cat(fused_features, dim=1)
+
+        ### Temporal Mask Model
+        temporal_output = self.temporal_mask_model(
+            fused_features, data_dict_list
+        )
+
+        psm_temporal = self.cls_head(temporal_output)
+        # rm_temporal = self.reg_head(temporal_output)
+
         
         ego_feature_list = [x[0:1,:] for x in regroup_feature_list[0]]
         ego_feature = torch.cat(ego_feature_list,dim=0)
@@ -298,8 +314,7 @@ class TemporalPointPillarScope(nn.Module):
             'rm_single_v': rm_single_v,
             'rm_single_i': rm_single_i,
             'comm_rate': communication_rates,
-            'temporal_mask': temporal_mask,
-            'temporal_masked_features': temporal_masked_features
+            'temporal_features': temporal_output
         })
 
         return output_dict
