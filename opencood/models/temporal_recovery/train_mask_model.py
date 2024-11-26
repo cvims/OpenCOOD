@@ -38,7 +38,8 @@ def main():
     TRAIN_DATA_PATH = '/data/public_datasets/OPV2V/original/train'
     VALIDATE_DATA_PATH = '/data/public_datasets/OPV2V/original/validate'
 
-    MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
+    # MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
+    MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241126180425'
 
     HYPES_YAML_FILE = os.path.join(MODEL_DIR, 'config.yaml')
 
@@ -99,7 +100,7 @@ def main():
     data_loader_validate = DataLoader(
         opencood_dataset_validate,
         batch_size=1,
-        num_workers=1,
+        num_workers=16,
         collate_fn=opencood_dataset_validate.collate_batch_test,
         shuffle=False,
         pin_memory=False,

@@ -8,51 +8,266 @@ from typing import Tuple
 
 
 class CustomSpatialTemporalTransformer(nn.Module):
-    def __init__(self, *, tensor_size: Tuple[int, int, int], patch_size: Tuple[int, int, int], embedding_dim: int, sequence_length: int):
+    def __init__(
+        self,
+        *,
+        tensor_size: Tuple[int, int, int],
+        patch_size: Tuple[int, int, int],
+        positional_masking: Tuple[int, int, int],
+        embedding_dim: int,
+        sequence_length: int,
+        num_layers: int = 6,
+        num_heads: int = 8,
+        keep_input_shape: bool = True
+    ):
         super().__init__()
+
+        self.keep_input_shape = keep_input_shape
+
+        # Unpack tensor and patch sizes
         channels, height, width = tensor_size
         patch_channels, patch_height, patch_width = patch_size
+
+        # Store original dimensions
+        self.original_channels = channels
+        self.original_height = height
+        self.original_width = width
+
+        self.sequence_length = sequence_length
+
+        # Store patch dimensions
         self.patch_channels = patch_channels
         self.patch_height = patch_height
         self.patch_width = patch_width
         self.embedding_dim = embedding_dim
+        self.num_heads = num_heads
+        self.num_layers = num_layers
 
-        assert [height % patch_height, width % patch_width, channels % patch_channels] == [0, 0, 0], 'Image dimensions must be divisible by the patch size.'
+        # Ensure image dimensions are divisible by patch sizes
+        assert (
+            height % patch_height == 0 and
+            width % patch_width == 0 and
+            channels % patch_channels == 0
+        ), 'Image dimensions must be divisible by the patch size.'
 
-        num_patches = (height // patch_height) * (width // patch_width) * (channels // patch_channels)
-        patch_dim = patch_channels * patch_height * patch_width
+        # Total number of patches
+        self.num_patches_c = channels // patch_channels
+        self.num_patches_h = height // patch_height
+        self.num_patches_w = width // patch_width
+        self.num_patches = self.num_patches_c * self.num_patches_h * self.num_patches_w
 
-        self.to_patch_embedding = nn.Linear(patch_dim, embedding_dim)
+        # Store positional masking
+        self.positonal_masking = positional_masking
 
-        self.pos_embedding = nn.Embedding(num_patches, embedding_dim)
+        # Dimension of each patch (flattened)
+        self.patch_dim = patch_channels * patch_height * patch_width
 
+        # Linear layers for embedding and inverse embedding
+        self.to_patch_embedding = nn.Linear(self.patch_dim, embedding_dim)
+        self.inverse_patch_embedding = nn.Linear(embedding_dim, self.patch_dim)
+
+        # Positional and temporal embeddings
+        self.pos_embedding = nn.Embedding(self.num_patches, embedding_dim)
         self.temporal_embedding = nn.Embedding(sequence_length, embedding_dim)
 
-        self.transformer_encoder_layer = nn.TransformerEncoderLayer(d_model=embedding_dim, nhead=8)
+        # Transformer encoder
+        self.transformer_encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embedding_dim,
+            nhead=num_heads
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            self.transformer_encoder_layer,
+            num_layers=num_layers
+        )
 
-        self.transformer_encoder = nn.TransformerEncoder(self.transformer_encoder_layer, num_layers=6)
+        self.attn_mask = self._create_attn_mask()
+
+    def _create_attn_mask(self):    
+        mask_c, mask_h, mask_w = self.positonal_masking
+
+        pos_w = torch.arange(self.num_patches_w)  # Shape: [W]
+        pos_h = torch.arange(self.num_patches_h)  # Shape: [H]
+        pos_c = torch.arange(self.num_patches_c)  # Shape: [C]
+
+        pos_w1, pos_w2 = torch.meshgrid(pos_w, pos_w, indexing='ij')  # Shape: [W, W]
+        pos_h1, pos_h2 = torch.meshgrid(pos_h, pos_h, indexing='ij')  # Shape: [H, H]
+        pos_c1, pos_c2 = torch.meshgrid(pos_c, pos_c, indexing='ij')  # Shape: [C, C]
+
+        mask_w_diff = (pos_w1 - pos_w2).abs() <= mask_w  # Shape: [W, W]
+        mask_h_diff = (pos_h1 - pos_h2).abs() <= mask_h  # Shape: [H, H]
+        mask_c_diff = (pos_c1 - pos_c2).abs() <= mask_c  # Shape: [C, C]
+
+        # Combine masks
+        pos_mask = mask_c_diff[:, None, None, :, None, None] & \
+           mask_h_diff[None, :, None, None, :, None] & \
+           mask_w_diff[None, None, :, None, None, :] # Shape: [C, H, W, C, H, W]
+        pos_mask = rearrange(pos_mask, 'c h w c1 h1 w1 -> (c h w) (c1 h1 w1)') # Shape: [C * H * W, C * H * W] [num_patches, num_patches]
+
+        # Expand mask for the sequence length
+        attn_mask = (~pos_mask.repeat(self.sequence_length, self.sequence_length)).float() # Shape: [sequence_length * num_patches, sequence_length * num_patches]
+
+        # Adapt masking to be compatible with the transformer   
+        attn_mask = attn_mask.masked_fill(attn_mask == 1, float('-inf'))
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, 0.0)
+
+        return attn_mask
     
-    def forward(self, cobevt_embedding_sequence: torch.Tensor):
-        b, s, c, h, w = cobevt_embedding_sequence.shape
-        patched_embeddings = rearrange(cobevt_embedding_sequence, 'b s (p3 c) (h p1) (w p2) -> b s (h w c) (p1 p2 p3)', p1 = self.patch_height, p2 = self.patch_width, p3 = self.patch_channels)
-        
+    def forward(self, embedding_sequence: torch.Tensor):
+        # Input shape: [batch_size, sequence_length, channels, height, width]
+        batch_size, seq_len, channels, height, width = embedding_sequence.shape
+
+        # Rearrange input tensor into patches
+        # Resulting shape: [batch_size, sequence_length, num_patches, patch_dim]
+        patched_embeddings = rearrange(
+            embedding_sequence,
+            'b s (pc nc) (nh ph) (nw pw) -> b s (nc nh nw) (ph pw pc)', # ('b c (h p1) (w p2) -> b (h w) (p1 p2 c)'
+            ph=self.patch_height,
+            pw=self.patch_width,
+            pc=self.patch_channels,
+            nc=self.num_patches_c,
+            nh=self.num_patches_h,
+            nw=self.num_patches_w
+        )
+
+        # Project patches to embedding dimension
+        # Shape: [batch_size, sequence_length, num_patches, embedding_dim]
         embedding_sequence = self.to_patch_embedding(patched_embeddings)
 
-        pos_embedding = self.pos_embedding(torch.arange(embedding_sequence.shape[2], device=embedding_sequence.device)).repeat(b, s, 1, 1)
+        # Generate and add positional embeddings
+        pos_indices = torch.arange(self.num_patches, device=embedding_sequence.device)
+        pos_embedding = self.pos_embedding(pos_indices)
+        pos_embedding = pos_embedding.unsqueeze(0).unsqueeze(0)  # Shape: [1, 1, num_patches, embedding_dim]
+        pos_embedding = pos_embedding.expand(batch_size, seq_len, -1, -1)
+        embedding_sequence += pos_embedding
 
-        temporal_embedding = self.temporal_embedding(torch.arange(embedding_sequence.shape[1], device=embedding_sequence.device)).unsqueeze(1).repeat(b, 1, self.embedding_dim, 1)
+        # Generate and add temporal embeddings
+        temporal_indices = torch.arange(seq_len, device=embedding_sequence.device)
+        temporal_embedding = self.temporal_embedding(temporal_indices)
+        temporal_embedding = temporal_embedding.unsqueeze(0).unsqueeze(2)  # Shape: [1, seq_len, 1, embedding_dim]
+        temporal_embedding = temporal_embedding.expand(batch_size, -1, self.num_patches, -1)
+        embedding_sequence += temporal_embedding
 
-        embedding_sequence = embedding_sequence + pos_embedding + temporal_embedding
+        # Flatten sequence and patches into a single sequence dimension
+        # New shape: [batch_size, total_seq_len, embedding_dim]
+        total_seq_len = seq_len * self.num_patches
+        embedding_sequence = rearrange(embedding_sequence, 'b s p e -> b (s p) e')
 
-        embedding_sequence = rearrange(embedding_sequence, 'b s n d -> b (s n) d')
+        # Rearrange for transformer input (expected shape: [total_seq_len, batch_size, embedding_dim])
+        embedding_sequence = embedding_sequence.permute(1, 0, 2)
 
-        transformed_embedding_sequence = self.transformer_encoder(embedding_sequence)
+        # Apply transformer encoder
+        self.attn_mask = self.attn_mask.to(embedding_sequence.device)
+        transformed_sequence = self.transformer_encoder(embedding_sequence, mask=self.attn_mask)
 
-        transformed_embedding_sequence = rearrange(transformed_embedding_sequence, 'b (s n) d -> b s n d', s=s)
+        # Rearrange back to original shape
+        transformed_sequence = transformed_sequence.permute(1, 0, 2)
+        transformed_sequence = transformed_sequence.view(batch_size, seq_len, self.num_patches, self.embedding_dim)
 
-        last_transformed_embedding_sequence = transformed_embedding_sequence[:, -1]
+        # Get embeddings from the last time step
+        last_sequence = transformed_sequence[:, -1]  # Shape: [batch_size, num_patches, embedding_dim]
 
-        return last_transformed_embedding_sequence
+        if self.keep_input_shape:
+            # Inverse embedding to reconstruct patches
+            inverted_patches = self.inverse_patch_embedding(last_sequence)  # Shape: [batch_size, num_patches, patch_dim]
+
+            # Reconstruct the original image from patches
+            # Resulting shape: [batch_size, channels, height, width]
+            reconstructed_embeddings = rearrange(
+                inverted_patches,
+                'b (nc nh nw) (ph pw pc) -> b (pc nc) (nh ph) (nw pw)',
+                ph=self.patch_height,
+                pw=self.patch_width,
+                pc=self.patch_channels,
+                nc=self.num_patches_c,
+                nh=self.num_patches_h,
+                nw=self.num_patches_w
+            )
+        else:
+            reconstructed_embeddings = last_sequence
+
+        return reconstructed_embeddings
+    
+
+class TemporalEnhancedEncoder(nn.Module):
+    def __init__(
+            self,
+            input_shape: Tuple[int, int, int],
+            patch_size: Tuple[int, int, int],
+            attention_embedding_dim: int,
+            sequence_length: int,
+            positional_masking: Tuple[int, int, int],
+            channel_downsample_factor: int = 2,
+            spatial_downsample_factor: int = 2,
+    ):
+        super(TemporalEnhancedEncoder, self).__init__()
+
+        c, h, w = input_shape
+
+        self.channel_downsample_factor = channel_downsample_factor
+        self.spatial_downsample_factor = spatial_downsample_factor
+
+        stride = (spatial_downsample_factor, spatial_downsample_factor)
+        
+        down_channel_size = c // channel_downsample_factor
+
+        output_height = h // spatial_downsample_factor
+        output_width = w // spatial_downsample_factor
+
+        assert down_channel_size % patch_size[0] == 0, 'Channels must be divisible by patch size'
+        assert output_height % patch_size[1] == 0, 'Height must be divisible by patch size'
+        assert output_width % patch_size[2] == 0, 'Width must be divisible by patch size'
+
+        # conv downsampling
+        self.conv_encoder = nn.Sequential(
+            nn.Conv2d(c, down_channel_size, kernel_size=3, stride=stride, padding=1),
+            nn.BatchNorm2d(down_channel_size),
+            nn.ReLU(),
+            nn.Conv2d(down_channel_size, down_channel_size, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(down_channel_size),
+            nn.ReLU(),
+        )
+
+        # temporal attention
+        self.temporal_attention = CustomSpatialTemporalTransformer(
+            tensor_size=(down_channel_size, output_height, output_width),
+            patch_size=patch_size,
+            embedding_dim=attention_embedding_dim,
+            sequence_length=sequence_length,
+            positional_masking=positional_masking,
+            keep_input_shape=True
+        )
+
+        # upsample to original shape
+        spatial_upsample_factor = spatial_downsample_factor
+        
+        # interpolate and conv
+        self.conv_decoder = nn.Sequential(
+            nn.Upsample(scale_factor=spatial_upsample_factor, mode='bilinear', align_corners=False),
+            nn.Conv2d(down_channel_size, c, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(c),
+            nn.ReLU(),
+            nn.Conv2d(c, c, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(c),
+            nn.ReLU(),
+        )
+
+    def forward(self, batched_sequences: torch.Tensor):
+        # Input shape: [batch_size, sequence_length, channels, height, width]
+        batch_size, sequence_length, channels, height, width = batched_sequences.shape
+        stacked_sequences = batched_sequences.view(-1, channels, height, width)
+    
+        # downsampling
+        downsampled_sequences = self.conv_encoder(stacked_sequences)
+        downsampled_sequences = downsampled_sequences.view(batch_size, sequence_length, downsampled_sequences.shape[1], downsampled_sequences.shape[2], downsampled_sequences.shape[3])
+
+        # temporal attention
+        temporal_sequence = self.temporal_attention(downsampled_sequences)
+
+        # upsampling
+        upsampled_sequence = self.conv_decoder(temporal_sequence)
+
+        return upsampled_sequence
+
 
 if __name__ == "__main__":
     tensor_size = (256, 100, 352)
@@ -60,8 +275,23 @@ if __name__ == "__main__":
     # gcd = math.gcd(tensor_size[1], tensor_size[2], tensor_size[0])
     # divisors = [i for i in range(1, gcd + 1) if gcd % i == 0]
 
-    patch_size = (32, 25, 32)
-    model = CustomSpatialTemporalTransformer(tensor_size=tensor_size, patch_size=patch_size, embedding_dim=352, sequence_length=sequence_length)
+    channel_downsample_factor = 8
+    spatial_downsample_factor = 2
+
+    patch_size = (tensor_size[0] // channel_downsample_factor, 5, 16)
+    positional_masking = (patch_size[0], 2, 2)
+    embedding_dim = 128
+
+    model = TemporalEnhancedEncoder(
+        input_shape=tensor_size,
+        sequence_length=sequence_length,
+        patch_size=patch_size,
+        attention_embedding_dim=embedding_dim,
+        positional_masking=positional_masking,
+        channel_downsample_factor=channel_downsample_factor,
+        spatial_downsample_factor=spatial_downsample_factor,
+    )
+
     out = model(torch.randn(1, sequence_length, 256, 100, 352))
 
 

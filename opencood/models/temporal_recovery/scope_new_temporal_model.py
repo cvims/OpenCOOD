@@ -12,7 +12,7 @@ from opencood.models.sub_modules.temporal_late_fusion import LateFusion
 from opencood.models.sub_modules.temporal_fusion_lstm import TemporalFusion_lstm
 import torch
 from opencood.models.sub_modules.torch_transformation_utils import warp_affine_simple
-from opencood.models.temporal_recovery.jeremias_attn import CustomSpatialTemporalTransformer
+from opencood.models.temporal_recovery.jeremias_attn import TemporalEnhancedEncoder
 from opencood.visualization.vis_utils import plot_feature_map
 
 def transform_feature(feature_list,matrix_list,downsample_rate,discrete_ratio):
@@ -55,33 +55,29 @@ class TemporalPointPillarScope(nn.Module):
         self.late_fusion = LateFusion(args['fusion_args']['communication'])
         self.multi_scale = args['fusion_args']['multi_scale']
 
-        embedding_dim = 352
-        tensor_size = (256, 100, embedding_dim)
+
+        # TODO - To config parameters
+        tensor_size = (256, 100, 352)
         sequence_length = 4
-        patch_size = (32, 25, 32)
+        # gcd = math.gcd(tensor_size[1], tensor_size[2], tensor_size[0])
+        # divisors = [i for i in range(1, gcd + 1) if gcd % i == 0]
+
+        channel_downsample_factor = 8
+        spatial_downsample_factor = 2
+
+        patch_size = (tensor_size[0] // channel_downsample_factor, 5, 16)
+        positional_masking = (patch_size[0], 2, 2)
+        embedding_dim = 128
 
         # New
-        self.temporal_mask_model = CustomSpatialTemporalTransformer(
-            tensor_size=tensor_size,
+        self.temporal_mask_model = TemporalEnhancedEncoder(
+            input_shape=tensor_size,
+            sequence_length=sequence_length,
             patch_size=patch_size,
-            embedding_dim=embedding_dim,
-            sequence_length=sequence_length
-        )
-
-        self.temporal_adaption = nn.Sequential(
-            nn.Conv2d(
-                in_channels=256, out_channels=256, kernel_size=3, stride=1, padding=1
-            ),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-        )
-
-        self.temporal_mask_fusion = nn.Sequential(
-                nn.Conv2d(
-                in_channels=512, out_channels=256, kernel_size=3, stride=1, padding=1
-            ),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            attention_embedding_dim=embedding_dim,
+            positional_masking=positional_masking,
+            channel_downsample_factor=channel_downsample_factor,
+            spatial_downsample_factor=spatial_downsample_factor,
         )
 
         # PIllar VFE
@@ -287,12 +283,11 @@ class TemporalPointPillarScope(nn.Module):
 
         ### Temporal Mask Model
         temporal_output = self.temporal_mask_model(
-            fused_features, data_dict_list
+            fused_features#, data_dict_list
         )
 
         psm_temporal = self.cls_head(temporal_output)
         # rm_temporal = self.reg_head(temporal_output)
-
         
         ego_feature_list = [x[0:1,:] for x in regroup_feature_list[0]]
         ego_feature = torch.cat(ego_feature_list,dim=0)
