@@ -13,7 +13,8 @@ from opencood.tools import train_utils, inference_utils
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.data_utils.datasets import build_dataset
 from opencood.utils import eval_utils
-from opencood.models.temporal_recovery.scope_mask_model import TemporalPointPillarScope
+# from opencood.models.temporal_recovery.scope_mask_model import TemporalPointPillarScope
+from opencood.models.temporal_recovery.scope_new_temporal_model import TemporalPointPillarScope
 
 
 def create_result_stat_dict():
@@ -42,7 +43,7 @@ def main():
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/scope_temporal_4_steps_2024_11_15_11_50_15'
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121125726',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121210112',
-        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241125154956'
+        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241126212435'
     ]
 
     # HYPES_YAML_FILES = [os.path.join(model_dir, 'config.yaml') for model_dir in MODEL_DIRS]
@@ -90,7 +91,7 @@ def main():
         data_loader = DataLoader(
             opencood_dataset,
             batch_size=1,
-            num_workers=16,
+            num_workers=1,
             collate_fn=opencood_dataset.collate_batch_test,
             shuffle=False,
             pin_memory=False,

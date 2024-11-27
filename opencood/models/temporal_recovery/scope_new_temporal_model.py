@@ -12,7 +12,7 @@ from opencood.models.sub_modules.temporal_late_fusion import LateFusion
 from opencood.models.sub_modules.temporal_fusion_lstm import TemporalFusion_lstm
 import torch
 from opencood.models.sub_modules.torch_transformation_utils import warp_affine_simple
-from opencood.models.temporal_recovery.jeremias_attn import TemporalEnhancedEncoder
+from opencood.models.temporal_recovery.jeremias_attn import MaskedTemporalVisionTransformer
 from opencood.visualization.vis_utils import plot_feature_map
 
 def transform_feature(feature_list,matrix_list,downsample_rate,discrete_ratio):
@@ -57,27 +57,23 @@ class TemporalPointPillarScope(nn.Module):
 
 
         # TODO - To config parameters
-        tensor_size = (256, 100, 352)
-        sequence_length = 4
-        # gcd = math.gcd(tensor_size[1], tensor_size[2], tensor_size[0])
-        # divisors = [i for i in range(1, gcd + 1) if gcd % i == 0]
-
-        channel_downsample_factor = 8
-        spatial_downsample_factor = 2
-
-        patch_size = (tensor_size[0] // channel_downsample_factor, 5, 16)
-        positional_masking = (patch_size[0], 2, 2)
-        embedding_dim = 128
+        in_channels = 256       # Eingabekanäle (z. B. RGB-Bilder)
+        patch_size = (8, 32)    # Größe der Patches
+        embed_dim = 128         # Dimension der eingebetteten Features
+        num_heads = 4           # Anzahl der Attention-Köpfe
+        depth = 3               # Anzahl der Transformer-Schichten
+        seq_len = 4             # Anzahl der zeitlichen Frames
+        img_size = (100, 352)   # Größe der Eingabebilder (Höhe und Breite)
 
         # New
-        self.temporal_mask_model = TemporalEnhancedEncoder(
-            input_shape=tensor_size,
-            sequence_length=sequence_length,
-            patch_size=patch_size,
-            attention_embedding_dim=embedding_dim,
-            positional_masking=positional_masking,
-            channel_downsample_factor=channel_downsample_factor,
-            spatial_downsample_factor=spatial_downsample_factor,
+        self.temporal_mask_model = MaskedTemporalVisionTransformer(
+            in_channels=in_channels,
+            # patch_size=patch_size,
+            # embed_dim=embed_dim,
+            num_heads=num_heads,
+            depth=depth,
+            seq_len=seq_len,
+            img_size=img_size,
         )
 
         # PIllar VFE
@@ -280,6 +276,9 @@ class TemporalPointPillarScope(nn.Module):
             fused_features.append(fused_feature.unsqueeze(dim=1))
 
         fused_features = torch.cat(fused_features, dim=1)
+
+        # for transformer (from old to latest)
+        fused_features = fused_features.flip(dims=[1])
 
         ### Temporal Mask Model
         temporal_output = self.temporal_mask_model(
