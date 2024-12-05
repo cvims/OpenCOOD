@@ -5,120 +5,214 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 from typing import Tuple
+import random
+
+
+class CustomAttention(nn.Module):
+    def __init__(self, embed_dim: int) -> None:
+        super().__init__()
+
+        self.embed_dim = embed_dim
+
+    
+    def forward(self, q, k, v, sequences: int):
+        p, b, dim = q.shape  # patches, batch, dim; dim = t * h * w
+        
+        # Normalize using the square root of the dimension
+        scale = dim ** 0.5
+        
+        # Compute attention weights
+        attn_weights = torch.einsum('pbd,pbd->pbd', q, k) / scale  # [p, b, t * h * w]
+
+        # for each pixel of t i want a softmax score, so if t = 4 i want 4 softmax scores for h*w
+        attn_weights = attn_weights.view(p, b, sequences, -1)  # [p, b, t, h * w]
+        attn_weights = F.softmax(attn_weights, dim=2)  # [p, b, t, h * w]
+        attn_weights = attn_weights.view(p, b, -1)  # [p, b, t * h * w]
+        
+        # Compute the attention output
+        attn_output = torch.einsum('pbd,pbd->pbd', attn_weights, v)  # [p, b, t * h * w]
+
+        fused = attn_output.view(p, b, sequences, -1)  # [p, b, t, h * w]
+        fused = fused.sum(dim=2)  # [p, b, h * w]
+        
+        return fused, attn_weights
 
 
 class MaskedTemporalVisionTransformer(nn.Module):
-    def __init__(self, in_channels: int, num_heads: int, depth: int, seq_len: int, img_size: Tuple[int, int]):
+    def __init__(self, num_heads, channels: int, patch_size: tuple, image_size: tuple, sequence_length=4):
         super(MaskedTemporalVisionTransformer, self).__init__()
-        self.img_size = img_size
-        self.seq_len = seq_len
-        self.embed_dim = in_channels
+        self.num_heads = num_heads
+        self.patch_size_h, self.patch_size_w = patch_size
 
-        # one-step downsampling (half size)
-        self.downsample = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels // 2, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(in_channels // 2),
+        self.dim = self.patch_size_h * self.patch_size_w
+
+        self.num_patches = (image_size[0] // self.patch_size_h) * (image_size[1] // self.patch_size_w)
+
+        # input embedder
+        self.feature_map_embedding = nn.Conv2d(channels, 1, kernel_size=1)
+
+        # Conv2d patch embedding
+        self.patch_embedding = nn.Conv2d(channels, 1, kernel_size=1)
+
+        # # Linear embedding layer for patches
+        # self.patch_embedding = nn.Linear(self.dim * channels, self.dim)
+
+        # Spatial position embedding
+        self.spatial_pos_embedding = nn.Embedding(self.num_patches, self.dim)
+
+        # Temporal position embedding
+        self.temporal_pos_embedding = nn.Embedding(sequence_length, self.dim)
+
+        # # Temporal attention
+        # self.attention = nn.MultiheadAttention(
+        #     embed_dim=sequence_length * self.dim,
+        #     num_heads=1,
+        #     dropout=0.75,
+        #     batch_first=False)
+
+        # Custom Attention
+        self.attention = CustomAttention(embed_dim=sequence_length * self.dim)
+
+        # conv encodings
+        self.q_conv = nn.Conv2d(sequence_length, sequence_length, kernel_size=1)
+        self.k_conv = nn.Conv2d(sequence_length, sequence_length, kernel_size=1)
+        self.v_conv = nn.Conv2d(sequence_length, sequence_length, kernel_size=1)
+
+        # Temporal Attention (Conv)
+        # self.attention = ConvAttention(height=patch_size[0], width=patch_size[1], sequences=sequence_length, num_heads=num_heads)
+
+        # Final projection to reconstruct the spatial map
+        self.channel_upsampling = nn.Sequential(
+            nn.Conv2d(1, channels // 2, kernel_size=3, padding=1),
+            nn.BatchNorm2d(channels // 2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels // 2, channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
         )
 
-        # to initial size
-        self.upsample = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            nn.Conv2d(in_channels, in_channels * 2, kernel_size=3, padding=1),
-            nn.BatchNorm2d(in_channels * 2),
+        self.out_proj = nn.Sequential(
+            nn.Conv2d(1, 2, kernel_size=5, padding=2),
+            nn.BatchNorm2d(2),
             nn.ReLU(inplace=True),
+            nn.Conv2d(2, channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(channels),
         )
 
-        # Define temporal and spatial position embeddings
-        self.temporal_pos_embed = nn.Parameter(torch.zeros(1, seq_len, in_channels // 2))
+    def extract_patches(self, x):
+        """Extract patches from the spatial dimensions."""
+        b, t, c, h, w = x.shape
+        ph, pw = self.patch_size_h, self.patch_size_w
 
-        # Transformer encoder layers
-        transformer_encoder_layer = nn.TransformerEncoderLayer(
-            d_model=self.embed_dim,
-            nhead=num_heads,
-            dim_feedforward=self.embed_dim * 2,
-            dropout=0.1,
-        )
-        self.transformer_encoder = nn.TransformerEncoder(
-            transformer_encoder_layer,
-            num_layers=depth,
-        )
+        # Ensure height and width are divisible by patch size
+        assert h % ph == 0 and w % pw == 0, "Height and Width must be divisible by patch size."
 
-        # Final projection back to input channels
-        self.final_conv = nn.Sequential(
-            nn.Conv2d(self.embed_dim, in_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(in_channels),
-            nn.ReLU(inplace=True),
-        )
+        # Reshape to extract patches
+        patches = x.unfold(3, ph, ph).unfold(4, pw, pw)  # [b, t, c, h/ph, w/pw, ph, pw]
+        patches = patches.contiguous().view(b, t, c, -1, ph * pw)  # [b, t, c, num_patches, patch_area]
+        patches = patches.permute(0, 3, 1, 2, 4)  # [b, num_patches, t, c, patch_area]
 
-        # Generate a pixel-based mask (temporal and spatial)
-        self.mask = self._generate_mask(img_size[0], img_size[1], seq_len)
+        # Flatten patch content and prepare for embedding
+        patches = patches.flatten(-2, -1)  # [b, num_patches, t, patch_area * c]
+        return patches
 
-    def _generate_mask(self, h, w, seq_len, radius=1):
+    def reconstruct_from_patches(self, patches, h, w):
         """
-        Generates a mask to restrict attention to neighboring pixels at the same position
-        across time and their neighbors.
+        Reconstruct the original image from extracted patches.
+
+        Args:
+            patches: Tensor of shape [b, num_patches, patch_area * c]
+            h: Original height of the image.
+            w: Original width of the image.
+
+        Returns:
+            Reconstructed image of shape [b, c, h, w].
         """
-        total_tokens = seq_len * h * w
-        mask = torch.zeros(total_tokens, total_tokens, dtype=torch.bool)
-
-        for t in range(seq_len):
-            for i in range(h):
-                for j in range(w):
-                    for dt in range(-radius, radius + 1):  # Temporal neighbors
-                        for di in range(-radius, radius + 1):  # Spatial neighbors
-                            for dj in range(-radius, radius + 1):
-                                ni, nj = i + di, j + dj
-                                nt = t + dt
-
-                                if 0 <= ni < h and 0 <= nj < w and 0 <= nt < seq_len:
-                                    neighbor_pixel = nt * h * w + ni * w + nj
-                                    src_idx = t * h * w + i * w + j
-                                    mask[src_idx, neighbor_pixel] = 1
-
-        return ~mask  # Invert to mask invalid positions
-
-    def forward(self, feature_maps):
-        # Input: [BS, Seq, C, H, W]
-        bs, seq, c, h, w = feature_maps.shape
-        x = feature_maps.view(-1, c, h, w)  # Flatten temporal dimension
-
-        latest_feature_map = feature_maps[:, -1]
-
-        x = self.downsample(x)
+        b, num_patches, patch_area_c = patches.shape
+        ph, pw = self.patch_size_h, self.patch_size_w
+        c = patch_area_c // (ph * pw)  # Number of channels
         
-        down_h = x.shape[2]
-        down_w = x.shape[3]
+        # Step 1: Reshape patch content back to [b, num_patches, t, c, ph, pw]
+        patches = patches.view(b, num_patches, c, ph, pw)
+        
+        # Step 2: Place patches back in the spatial grid
+        h_patches, w_patches = h // ph, w // pw  # Number of patches along height and width
+        patches = patches.view(b, h_patches, w_patches, c, ph, pw)  # [b, h_patches, w_patches, c, ph, pw]
+        patches = patches.permute(0, 3, 1, 4, 2, 5).contiguous()  # [b, c, h_patches, ph, w_patches, pw]
 
-        # Flatten spatial dimensions to treat each pixel as a token
-        x = x.flatten(2).transpose(1, 2)  # [BS * Seq, Num_pixels, Embed_dim]
-        x = x.view(bs, seq, down_h * down_w, -1)  # [BS, Seq, Num_pixels, Embed_dim]
+        # Step 3: Merge patches into the original spatial dimensions
+        reconstructed = patches.view(b, c, h, w)  # [b, c, h, w]
 
-        # Add positional embedding
-        x = x.permute(0, 1, 3, 2) # [BS, Seq, Embed_dim, Num_pixels]
-        x = x + self.temporal_pos_embed.unsqueeze(-1)
-        x = x.permute(0, 1, 3, 2) # [BS, Seq, Num_pixels, Embed_dim]
+        return reconstructed
 
-        # Flatten temporal and spatial dimensions for transformer
-        x = torch.reshape(x, (bs, seq * down_h * down_w, -1))  # Flatten temporal and spatial dims
+    def forward(self, x):
+        # x shape: [batch_size, sequence_length, channels, height, width]
+        b, t, c, h, w = x.shape
 
-        # Apply transformer layers with the mask
-        x = x.permute(1, 0, 2)  # [Seq * Num_pixels, BS, Embed_dim]
-        # x = self.transformer_encoder(x, src_key_padding_mask=None, mask=self.mask.to(device=x.device))
-        x = self.transformer_encoder(x, src_key_padding_mask=None)
-        x = x.permute(1, 0, 2)  # [BS, Seq * Num_pixels, Embed_dim]
+        x = x.view(b * t, c, h, w)
 
-        # Reshape and reconstruct the output
-        x = x.view(bs, seq, h, w, -1)[:, -1]  # Take the last temporal step
-        x = x.permute(0, 3, 1, 2)  # [BS, Embed_dim, H, W]
+        fm_emb = self.feature_map_embedding(x)
 
-        # Upsample back to the original size
-        x = self.upsample(x)
+        x = x.view(b, t, c, h, w)
 
-        # Final projection
-        x = self.final_conv(x)
+        fm_emb = fm_emb.view(b, t, 1, h, w)
 
-        return x
+        # Step 1: Extract patches
+        patches = self.extract_patches(fm_emb).contiguous()  # [b, num_patches, t, patch_area * c]
+        patches = patches.squeeze(1)
+        b, num_patches, t, patch_dim = patches.shape
+        patches = patches.view(b * num_patches, t, -1) 
+        
+        fm_emb = fm_emb.squeeze(dim=2)
+
+        query = self.q_conv(fm_emb)  # [b, t, h, w]
+        query = self.extract_patches(query.unsqueeze(dim=2)).contiguous()  # [b, num_patches, t, h, w]
+        query = query.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)  # [b * num_patches, t, dim]
+        key = self.k_conv(fm_emb)  # [b, t, h, w]
+        key = self.extract_patches(key.unsqueeze(dim=2)).contiguous()  # [b, num_patches, t, h, w]
+        key = key.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)  # [b * num_patches, t, dim]
+        value = self.v_conv(fm_emb)  # [b, t, h, w]
+        value = self.extract_patches(value.unsqueeze(dim=2)).contiguous()  # [b, num_patches, t, h, w]
+        value = value.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)  # [b * num_patches, t, dim]
+
+        # Step 2: Apply temporal attention
+        # Add temporal position embedding
+        temporal_embeddings = self.temporal_pos_embedding(torch.arange(t).to(device=patches.device))
+        temporal_embeddings = temporal_embeddings.view(t, self.patch_size_h, self.patch_size_w)
+        query = query + temporal_embeddings
+        key = key + temporal_embeddings
+        value = value + temporal_embeddings
+
+        # add spatial embedding
+        spatial_embeddings = self.spatial_pos_embedding(torch.arange(num_patches).to(device=patches.device))
+        spatial_embeddings = spatial_embeddings.view(1, num_patches, 1, self.patch_size_h, self.patch_size_w).repeat(b, 1, t, 1, 1)
+        spatial_embeddings = spatial_embeddings.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)
+        query = query + spatial_embeddings
+        key = key + spatial_embeddings
+        value = value + spatial_embeddings
+
+        # Step 3: Attention
+        query = query.view(b, num_patches, t * self.patch_size_h * self.patch_size_w).permute(1,0,2).contiguous() # [num_patches, b, t * h * w]
+        key = key.view(b, num_patches, t * self.patch_size_h * self.patch_size_w).permute(1,0,2).contiguous()
+        value = value.view(b, num_patches, t * self.patch_size_h * self.patch_size_w).permute(1,0,2).contiguous()
+
+        attn_output, _ = self.attention(query, key, value, sequences=t)  # [num_patches, b, t * dim]
+        patches = attn_output.permute(1, 0, 2).contiguous()
+        # patches = patches.view(num_patches * b, t, self.dim)  # [b * num_patches, t, dim]
+
+        # patches = patches[:, -1, :]  # Temporal fusion: [b * num_patches, dim] (we pick the latest frame)
+
+        patches = patches.view(b, num_patches, -1)  # [b, num_patches, dim]
+
+        # Reconstruct the spatial map
+        reconstructed_patches = self.reconstruct_from_patches(patches, h, w)
+
+        # Step 4: Channel upsampling (to original number of channels)
+        # upsampled = self.channel_upsampling(reconstructed_patches)
+
+        upsampled = self.out_proj(reconstructed_patches)
+
+        return upsampled
 
 
 # class MaskedTemporalVisionTransformer(nn.Module):
