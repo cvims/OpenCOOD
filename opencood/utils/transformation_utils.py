@@ -133,3 +133,28 @@ def calculate_prev_pose_offset(cur_data, prev_data):
             prev_pose_offset = np.eye(4)
 
         return prev_pose_offset
+
+def calculate_rotation(pose1, pose2):
+    """
+    Calculate the rotation matrix from pose1 to pose2.
+
+    Parameters
+    ----------
+    pose1 : list
+        The pose of x1 under world coordinates.
+    pose2 : list
+        The pose of x2 under world coordinates.
+
+    Returns
+    -------
+    rotation_matrix : np.ndarray
+        The rotation matrix.
+
+    """
+    x1_to_world = x_to_world(pose1)
+    x2_to_world = x_to_world(pose2)
+    world_to_x2 = np.linalg.inv(x2_to_world)
+
+    transformation_matrix = np.dot(world_to_x2, x1_to_world)
+    rotation_matrix = transformation_matrix[:3, :3]
+    return rotation_matrix

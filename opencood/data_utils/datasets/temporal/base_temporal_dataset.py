@@ -4,11 +4,13 @@ Basedataset class for lidar data pre-processing
 from collections import OrderedDict
 import numpy as np
 import random
+import tqdm
 
 from opencood.utils.pcd_utils import pcd_to_np
 from opencood.utils.camera_utils import load_rgb_from_files
-from opencood.utils.transformation_utils import calculate_prev_pose_offset
+from opencood.utils.transformation_utils import calculate_prev_pose_offset, calculate_rotation, x1_to_x2
 from opencood.data_utils.datasets.basedataset import BaseDataset
+from opencood.data_utils.datasets import GT_RANGE
 
 
 class BaseTemporalDataset(BaseDataset):
@@ -60,9 +62,126 @@ class BaseTemporalDataset(BaseDataset):
         # CAV communication dropout
         self.comm_dropout = params['fusion']['args']['communication_dropout'] if 'communication_dropout' in params['fusion']['args'] else 0
 
+        # Only load temporal potential data
+        self.temporal_potential_only = params['fusion']['args']['temporal_potential_only'] if 'temporal_potential_only' in params['fusion']['args'] else False
+
         super(BaseTemporalDataset, self).__init__(params, visualize, train, validate, preload_lidar_files=preload_lidar_files, preload_camera_files=preload_camera_files, **kwargs)
 
-        self._apply_communication_dropout()
+        # self._apply_communication_dropout()
+        # self._apply_temporal_potential_only(GT_RANGE)
+
+
+    def _apply_temporal_potential_only(self, range_filter):
+        """
+        We delete data that does not have temporal potential.
+        We use the center of the vehicles and the range filter (from center of ego)
+        to determine if the vehicle is in the range.
+        range_filter: [x_min, y_min, z_min, x_max, y_max, z_max]
+        """
+        self.indices_with_temporal_potential = []
+        self.adjusted_len_record = self.len_record
+
+        if not self.temporal_potential_only:
+            return
+
+        def get_frame_opv2v_visible_vehicles(frame_data):
+            # Create a mask by stacking conditions along the last axis and using np.all
+            min_bounds = np.array(range_filter[:3])
+            max_bounds = np.array(range_filter[3:])
+
+            ego_id, ego_data = [(v_id, frame_data[v_id]) for v_id, v_data in frame_data.items() if v_data['ego']][0]
+
+            # find ego lidar pose
+            ego_pose = np.asarray(ego_data['params']['lidar_pose'], dtype=np.float32)
+
+            # calculate the distance between the ego and the other vehicles
+            all_vehicles = ego_data['params']['temporal_vehicles']
+
+            # in_range_vehicles = [v_id for v_id in all_vehicles if v_id != ego_id]
+            in_range_vehicles = set()
+            for v_id in all_vehicles:
+                if v_id == ego_id:
+                    continue
+                veh_loc = np.asarray(all_vehicles[v_id]['location'], dtype=np.float32)
+                veh_center = np.asarray(all_vehicles[v_id]['center'], dtype=np.float32)
+                veh_angle = np.asarray(all_vehicles[v_id]['angle'], dtype=np.float32)
+
+                vehicle_pose = [
+                    veh_loc[0] + veh_center[0],
+                    veh_loc[1] + veh_center[1],
+                    veh_loc[2] + veh_center[2],
+                    veh_angle[0], veh_angle[1], veh_angle[2]
+                ]
+
+                loc_offset = x1_to_x2(vehicle_pose, ego_pose)[:,-1][:2]
+
+                # Efficient masking by checking all conditions in one pass
+                in_range = np.all((loc_offset[:2] >= min_bounds[:2]) & (loc_offset[:2] <= max_bounds[:2]))
+
+                if in_range:
+                    in_range_vehicles.add(v_id)
+
+            # preset the opv2v_visible flag to False
+            opv2v_visible_vehicles = {v_id: False for v_id in in_range_vehicles}
+
+            # check "opv2v_visible" across all cavs (incl. ego)
+            for cav_id, cav_data in frame_data.items():
+                cav_vehicles = cav_data['params']['temporal_vehicles']
+                for v_id in cav_vehicles:
+                    if v_id not in opv2v_visible_vehicles:
+                        continue
+                    if cav_vehicles[v_id]['opv2v_visible'] == True:
+                        opv2v_visible_vehicles[v_id] = True
+            
+            return opv2v_visible_vehicles
+
+
+        for idx in tqdm.tqdm(range(self.len_record[-1]), desc='Filtering for temporal potential'):
+            data_queue = self.retrieve_temporal_data(idx, cur_ego_pose_flag=True, load_camera_data=False, load_lidar_data=False)
+
+            # objects ids of the current frame
+            latest_frame_data = data_queue[-1]
+            last_frame_opv2v_visible_vehicles = get_frame_opv2v_visible_vehicles(latest_frame_data)
+
+            # get temporal potential vehicles from previous frames in data queue
+            # find if opv2v_visible is True for any of the vehicles in the previous frames
+            has_temporal_potential = False
+            for i in range(len(data_queue) - 1):
+                if has_temporal_potential:
+                    break
+
+                frame_data = data_queue[i]
+                opv2v_visible_vehicles = get_frame_opv2v_visible_vehicles(frame_data)
+
+                for v_id in last_frame_opv2v_visible_vehicles:
+                    # if not visible in last_frame, we check if it is visible in the previous frame
+                    last_frame_opv2v_visible = last_frame_opv2v_visible_vehicles[v_id]
+                    if not last_frame_opv2v_visible:
+                        # check if the vehicle was NOT visible in the previous frame
+                        if v_id in opv2v_visible_vehicles and opv2v_visible_vehicles[v_id]:
+                            has_temporal_potential = True
+                            break
+            
+            if has_temporal_potential:
+                self.indices_with_temporal_potential.append(idx)
+        
+        # update len_records
+        last_index = 0
+        new_len_records = [0 for _ in range(len(self.len_record))]
+        for i, ele in enumerate(self.len_record):
+            prev_len_record = new_len_records[i - 1] if i > 0 else 0
+            new_len_records[i] = prev_len_record
+            for j, idx in enumerate(self.indices_with_temporal_potential[last_index:]):
+                if idx < ele:
+                    new_len_records[i] += 1
+                else:
+                    last_index += j
+                    break
+                if j + last_index == len(self.indices_with_temporal_potential) - 1:
+                    last_index += j + 1
+                    break
+        
+        self.adjusted_len_record = new_len_records
 
 
     def _apply_communication_dropout(self):
@@ -94,9 +213,16 @@ class BaseTemporalDataset(BaseDataset):
     def reinitialize(self):
         super().reinitialize()
         self._apply_communication_dropout()
+        self._apply_temporal_potential_only(GT_RANGE)
+    
+    def get_corrected_idx(self, idx):
+        if idx < len(self.indices_with_temporal_potential):
+            return self.indices_with_temporal_potential[idx]
+        else:
+            return idx
 
     def __len__(self):
-        return self.len_record[-1]
+        return self.adjusted_len_record[-1]
 
     def __getitem__(self, idx):
         """
@@ -108,7 +234,7 @@ class BaseTemporalDataset(BaseDataset):
         """
         Retrieves base data for timestamps prior to the current one.
         """
-        assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
+        # assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
 
         scenario_database = self.scenario_database[scenario_index]
         timestamp_key = self.return_timestamp_key(scenario_database, timestamp_index)
@@ -158,7 +284,7 @@ class BaseTemporalDataset(BaseDataset):
         return data
 
     def retrieve_temporal_data(self, idx, cur_ego_pose_flag=True, load_camera_data=False, load_lidar_data=False):
-        assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
+        # assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
         # if the queue length is set to 1, then the vehicle offset is already the connection to the previous car
         # otherwise it starts with the second vehicle (e.g. the first vehicle offset is the identity matrix)
 

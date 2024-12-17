@@ -33,7 +33,7 @@ def main():
     HYPES_YAML_FILE = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V/config.yaml'
     TEMPORAL_STEPS = 4
 
-    SPLIT = 'train'  # 'train', 'validate', 'test'
+    SPLIT = 'test'  # 'train', 'validate', 'test'
 
     DATASET_PATH = "/data/public_datasets/OPV2V/original"
     
@@ -43,11 +43,12 @@ def main():
     hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
     hypes['fusion']['args']['temporal_ego_only'] = False
     hypes['fusion']['args']['communication_dropout'] = 0.5
+    hypes['fusion']['args']['temporal_potential_only'] = False
 
     print('Dataset Building')
     opencood_dataset = build_dataset(
         hypes, visualize=True, train=False,
-        # use_scenarios_idx=[0],
+        use_scenarios_idx=None,
     )
     print(f"{len(opencood_dataset)} samples found.")
 
@@ -62,7 +63,7 @@ def main():
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    len_records = opencood_dataset.len_record
+    len_records = opencood_dataset.adjusted_len_record
     scenario_temporal_recovered = dict()
 
     for i, batch_data in tqdm(enumerate(data_loader), total=len(data_loader)):
@@ -74,7 +75,7 @@ def main():
         gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
 
         for j, len_record in enumerate(len_records):
-            if i <= len_record:
+            if i < len_record:
                 if j in scenario_temporal_recovered:
                     scenario_temporal_recovered[j] += calculate_temporal_recovered(gt_object_ids_criteria)
                 else:

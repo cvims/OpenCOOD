@@ -416,10 +416,11 @@ class BaseDataset(Dataset):
         ------
         The merged parameters.
         """
-        cur_params = copy.deepcopy(cav_content[timestamp_cur]['yaml'])
+
+        cur_params = cav_content[timestamp_cur]['yaml']
         delay_params = copy.deepcopy(cav_content[timestamp_delay]['yaml'])
 
-        cur_ego_params = copy.deepcopy(ego_content[timestamp_cur]['yaml'])
+        cur_ego_params = ego_content[timestamp_cur]['yaml']
         delay_ego_params = copy.deepcopy(ego_content[timestamp_delay]['yaml'])
 
         # we need to calculate the transformation matrix from cav to ego
@@ -468,7 +469,7 @@ class BaseDataset(Dataset):
         """
         Retrieves the base data for a given timestamp index or (scenario, timestamp) tuple.
         """
-        assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
+        # assert load_camera_data or load_lidar_data, 'At least one of the data should be loaded'
 
         # Determine scenario and timestamp index
         if isinstance(idx, int):

@@ -49,6 +49,8 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
 
 
     def __getitem__(self, idx):
+        idx = self.get_corrected_idx(idx)
+
         scenario_samples = self.get_sample_random(idx)
 
         scenario_processed = []
@@ -63,21 +65,19 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
         ego_vehicles = None
 
         # first find the ego vehicle's lidar pose (scenario_samples[-1] because it is the last frame)
-        for i, data_sample in enumerate(scenario_samples):
-            for cav_id, ego_content in data_sample.items():
-                if ego_content['ego']:
-                    ego_id = cav_id
-                    if prev_ego_id == -999:
-                        prev_ego_id = ego_id
-                    if ego_id != prev_ego_id:
-                        print('Attention: Ego vehicle changed in the same scenario.')
+        for cav_id, ego_content in scenario_samples[-1].items():
+            if ego_content['ego']:
+                ego_id = cav_id
+                if prev_ego_id == -999:
                     prev_ego_id = ego_id
-                    ego_lidar_pose = ego_content['params']['lidar_pose']
-                    ego_loc = ego_content['params']['true_ego_pos']
-                    ego_vehicles = ego_content['params']['vehicles']
-                    break
-            assert cav_id == list(data_sample.keys())[
-                0], "The first element in the OrderedDict must be ego"
+                if ego_id != prev_ego_id:
+                    print('Attention: Ego vehicle changed in the same scenario.')
+                prev_ego_id = ego_id
+                ego_lidar_pose = ego_content['params']['lidar_pose']
+                ego_loc = ego_content['params']['true_ego_pos']
+                ego_vehicles = ego_content['params']['vehicles']
+                break
+        assert cav_id == list(scenario_samples[-1].keys())[0], "The first element in the OrderedDict must be ego"
 
         assert ego_id != -999
         assert len(ego_lidar_pose) > 0
@@ -142,14 +142,14 @@ class TemporalLidarIntermediateFusionDataset(BaseTemporalLidarDataset):
                             continue
                         # Update KITTI criteria for cooperative perception
                         # CAVs can have easier visibility criteria than ego
-                        if cav_id not in selected_cav_base['params']['vehicles']:
-                            continue
-                        updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['params']['vehicles'][v_id], self.kitti_detection_criteria)
+                        # if cav_id not in selected_cav_base['params']['vehicles']:
+                        #     continue
+                        updated_kitti_criteria = update_kitti_criteria(ego_range_vehicles[v_id], selected_cav_base['params']['temporal_vehicles'][v_id], self.kitti_detection_criteria)
                         ego_range_vehicles[v_id]['kitti_criteria'] = updated_kitti_criteria['kitti_criteria']
                         ego_range_vehicles[v_id]['kitti_criteria_props'] = updated_kitti_criteria['kitti_criteria_props']
                         # opv2v visible
-                        if not ego_range_vehicles[v_id]['opv2v_visible'] and selected_cav_base['params']['vehicles'][v_id]['opv2v_visible']:
-                            ego_range_vehicles[v_id]['opv2v_visible'] = selected_cav_base['params']['vehicles'][v_id]['opv2v_visible']
+                        if not ego_range_vehicles[v_id]['opv2v_visible'] and selected_cav_base['params']['temporal_vehicles'][v_id]['opv2v_visible']:
+                            ego_range_vehicles[v_id]['opv2v_visible'] = selected_cav_base['params']['temporal_vehicles'][v_id]['opv2v_visible']
 
                 cav_object_bbx_center = self.post_processor.generate_cav_object_center(selected_cav_base['params']['cav_vehicle'], ego_lidar_pose)
                 cav_object_stack.append(cav_object_bbx_center)
@@ -647,42 +647,44 @@ if __name__ == '__main__':
 
     params['fusion']['args']['queue_length'] = 4
     params['fusion']['args']['temporal_ego_only'] = False
-    # params['fusion']['args']['communication_dropout'] = 0.7
-
-    dataset = TemporalLidarIntermediateFusionDataset(
-        params, visualize=False, train=True, validate=False,
-        use_scenarios_idx=use_scenarios_idx,
-        preload_lidar_files=True)
-
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=1,
-        shuffle=False,
-        collate_fn=dataset.collate_batch,
-        num_workers=16)
-
-    _start_time = time.time()
-    for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
-        # if i == 500:
-        #     break
-        pass
-    _end_time = time.time()
-    print(f"Time: {_end_time - _start_time}")
+    params['fusion']['args']['communication_dropout'] = 0.7
+    params['fusion']['args']['temporal_potential_only'] = True
 
     # dataset = TemporalLidarIntermediateFusionDataset(
     #     params, visualize=False, train=True, validate=False,
-    #     preload_lidar_files=False)
+    #     use_scenarios_idx=use_scenarios_idx,
+    #     preload_lidar_files=True)
 
     # dataloader = torch.utils.data.DataLoader(
     #     dataset,
     #     batch_size=1,
     #     shuffle=False,
     #     collate_fn=dataset.collate_batch,
-    #     num_workers=8)
+    #     num_workers=1)
 
     # _start_time = time.time()
     # for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
-    #     if i == 500:
-    #         break
+    #     # if i == 500:
+    #     #     break
+    #     pass
     # _end_time = time.time()
     # print(f"Time: {_end_time - _start_time}")
+
+    dataset = TemporalLidarIntermediateFusionDataset(
+        params, visualize=False, train=True, validate=False,
+        preload_lidar_files=False)
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        collate_fn=dataset.collate_batch,
+        num_workers=1)
+
+    _start_time = time.time()
+    for i, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
+        # if i == 500:
+        #     break+
+        pass
+    _end_time = time.time()
+    print(f"Time: {_end_time - _start_time}")

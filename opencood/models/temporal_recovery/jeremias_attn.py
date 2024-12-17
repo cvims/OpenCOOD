@@ -15,27 +15,39 @@ class CustomAttention(nn.Module):
         self.embed_dim = embed_dim
 
     
-    def forward(self, q, k, v, sequences: int):
-        p, b, dim = q.shape  # patches, batch, dim; dim = t * h * w
-        
+    def forward(self, query, key, value, sequences: int):
+        p, b, dim = query.shape  # patches, batch, dim; dim = t * h * w
+
+        q = query
+        k = key
+        v = value
+
+        # q = query.view(p, b, 1, -1)  # [p, b, t, h * w]
+        # k = key.view(p, b, sequences-1, -1)  # [p, b, t-1, h * w]
+        v = value.view(p, b, sequences, -1)  # [p, b, t, h * w]
+
         # Normalize using the square root of the dimension
         scale = dim ** 0.5
-        
+
+        # # Compute attention weights
+        # attn_weights = torch.einsum('pbqd,pbkd->pbd', q, k) / scale  # [p, b, d]
+
+        # attn_weights = F.softmax(attn_weights, dim=-1)  # [p, b, h * w]
+
+        # # Compute the attention output
+        # attn_output = torch.einsum('pbd,pbtd->pbd', attn_weights, v)  # [p, b, h * w]
+
         # Compute attention weights
-        attn_weights = torch.einsum('pbd,pbd->pbd', q, k) / scale  # [p, b, t * h * w]
+        attn_weights = torch.einsum('pbd,pbd->pbd', q, k) / scale  # [p, b, d]
 
-        # for each pixel of t i want a softmax score, so if t = 4 i want 4 softmax scores for h*w
-        attn_weights = attn_weights.view(p, b, sequences, -1)  # [p, b, t, h * w]
-        attn_weights = F.softmax(attn_weights, dim=2)  # [p, b, t, h * w]
-        attn_weights = attn_weights.view(p, b, -1)  # [p, b, t * h * w]
-        
+        attn_weights = attn_weights.view(p, b, sequences, -1)  # [p, b, t-1, h * w]
+        attn_weights = F.softmax(attn_weights, dim=2)  # [p, b, h * w]
+        # attn_weights = attn_weights.view(p, b, -1)  # [p, b, t-1, h * w]
+
         # Compute the attention output
-        attn_output = torch.einsum('pbd,pbd->pbd', attn_weights, v)  # [p, b, t * h * w]
+        attn_output = torch.einsum('pbtd,pbtd->pbd', attn_weights, v)  # [p, b, h * w]
 
-        fused = attn_output.view(p, b, sequences, -1)  # [p, b, t, h * w]
-        fused = fused.sum(dim=2)  # [p, b, h * w]
-        
-        return fused, attn_weights
+        return attn_output, attn_weights
 
 
 class MaskedTemporalVisionTransformer(nn.Module):
@@ -43,16 +55,23 @@ class MaskedTemporalVisionTransformer(nn.Module):
         super(MaskedTemporalVisionTransformer, self).__init__()
         self.num_heads = num_heads
         self.patch_size_h, self.patch_size_w = patch_size
-
-        self.dim = self.patch_size_h * self.patch_size_w
-
         self.num_patches = (image_size[0] // self.patch_size_h) * (image_size[1] // self.patch_size_w)
 
-        # input embedder
-        self.feature_map_embedding = nn.Conv2d(channels, 1, kernel_size=1)
+        self.channel_downsize = 1
 
-        # Conv2d patch embedding
-        self.patch_embedding = nn.Conv2d(channels, 1, kernel_size=1)
+        self.dim = self.patch_size_h * self.patch_size_w * self.channel_downsize
+        self.patch_size_h = self.patch_size_h * self.channel_downsize
+        self.patch_size_w = self.patch_size_w * self.channel_downsize        
+
+        # input embedder
+        self.feature_map_embedding = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels, self.channel_downsize, kernel_size=1),
+            nn.BatchNorm2d(self.channel_downsize),
+            nn.ReLU(inplace=True),
+        )
 
         # # Linear embedding layer for patches
         # self.patch_embedding = nn.Linear(self.dim * channels, self.dim)
@@ -74,9 +93,12 @@ class MaskedTemporalVisionTransformer(nn.Module):
         self.attention = CustomAttention(embed_dim=sequence_length * self.dim)
 
         # conv encodings
-        self.q_conv = nn.Conv2d(sequence_length, sequence_length, kernel_size=1)
-        self.k_conv = nn.Conv2d(sequence_length, sequence_length, kernel_size=1)
-        self.v_conv = nn.Conv2d(sequence_length, sequence_length, kernel_size=1)
+        # self.q_conv = nn.Conv2d(1, 1, kernel_size=1) # only current frame
+        # self.k_conv = nn.Conv2d(sequence_length-1, sequence_length-1, kernel_size=1) # all frames except current
+        # self.v_conv = nn.Conv2d(sequence_length, sequence_length, kernel_size=1) # all frames
+        self.q_conv = nn.Conv2d(sequence_length, sequence_length, kernel_size=1) # only current frame
+        self.k_conv = nn.Conv2d(sequence_length, sequence_length, kernel_size=1) # all frames except current
+        self.v_conv = nn.Conv2d(sequence_length, sequence_length, kernel_size=1) # all frames
 
         # Temporal Attention (Conv)
         # self.attention = ConvAttention(height=patch_size[0], width=patch_size[1], sequences=sequence_length, num_heads=num_heads)
@@ -95,8 +117,9 @@ class MaskedTemporalVisionTransformer(nn.Module):
             nn.Conv2d(1, 2, kernel_size=5, padding=2),
             nn.BatchNorm2d(2),
             nn.ReLU(inplace=True),
-            nn.Conv2d(2, channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(channels),
+            nn.Conv2d(2, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
         )
 
     def extract_patches(self, x):
@@ -155,23 +178,33 @@ class MaskedTemporalVisionTransformer(nn.Module):
 
         x = x.view(b, t, c, h, w)
 
-        fm_emb = fm_emb.view(b, t, 1, h, w)
+        fm_emb = fm_emb.view(b, t, self.channel_downsize, h, w)
 
         # Step 1: Extract patches
         patches = self.extract_patches(fm_emb).contiguous()  # [b, num_patches, t, patch_area * c]
         patches = patches.squeeze(1)
         b, num_patches, t, patch_dim = patches.shape
-        patches = patches.view(b * num_patches, t, -1) 
-        
-        fm_emb = fm_emb.squeeze(dim=2)
+        patches = patches.view(b * num_patches, t, -1)
 
-        query = self.q_conv(fm_emb)  # [b, t, h, w]
-        query = self.extract_patches(query.unsqueeze(dim=2)).contiguous()  # [b, num_patches, t, h, w]
-        query = query.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)  # [b * num_patches, t, dim]
-        key = self.k_conv(fm_emb)  # [b, t, h, w]
-        key = self.extract_patches(key.unsqueeze(dim=2)).contiguous()  # [b, num_patches, t, h, w]
-        key = key.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)  # [b * num_patches, t, dim]
-        value = self.v_conv(fm_emb)  # [b, t, h, w]
+        fm_emb = fm_emb.squeeze(2)
+
+        # query = self.q_conv(fm_emb[:,-1:])  # [b, 1, h, w] - only latest frame
+        # query = self.extract_patches(query.unsqueeze(dim=2)).contiguous()  # [b, num_patches, 1, h, w]
+        # query = query.view(b * num_patches, 1, self.patch_size_h, self.patch_size_w)  # [b * num_patches, 1, dim]
+        # key = self.k_conv(fm_emb[:,:-1])  # [b, t-1, h, w] - all frames except current
+        # key = self.extract_patches(key.unsqueeze(dim=2)).contiguous()  # [b, num_patches, t-1, h, w]
+        # key = key.view(b * num_patches, t-1, self.patch_size_h, self.patch_size_w)  # [b * num_patches, t-1, dim]
+        # value = self.v_conv(fm_emb)  # [b, t, h, w] - all frames
+        # value = self.extract_patches(value.unsqueeze(dim=2)).contiguous()  # [b, num_patches, t, h, w]
+        # value = value.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)  # [b * num_patches, t, dim]
+
+        query = self.q_conv(fm_emb)  # [b, 1, h, w] - only latest frame
+        query = self.extract_patches(query.unsqueeze(dim=2)).contiguous()  # [b, num_patches, 1, h, w]
+        query = query.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)  # [b * num_patches, 1, dim]
+        key = self.k_conv(fm_emb)  # [b, t-1, h, w] - all frames except current
+        key = self.extract_patches(key.unsqueeze(dim=2)).contiguous()  # [b, num_patches, t-1, h, w]
+        key = key.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)  # [b * num_patches, t-1, dim]
+        value = self.v_conv(fm_emb)  # [b, t, h, w] - all frames
         value = self.extract_patches(value.unsqueeze(dim=2)).contiguous()  # [b, num_patches, t, h, w]
         value = value.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)  # [b * num_patches, t, dim]
 
@@ -179,6 +212,9 @@ class MaskedTemporalVisionTransformer(nn.Module):
         # Add temporal position embedding
         temporal_embeddings = self.temporal_pos_embedding(torch.arange(t).to(device=patches.device))
         temporal_embeddings = temporal_embeddings.view(t, self.patch_size_h, self.patch_size_w)
+        # query = query + temporal_embeddings[-1:, :, :]
+        # key = key + temporal_embeddings[:-1, :, :]
+        # value = value + temporal_embeddings
         query = query + temporal_embeddings
         key = key + temporal_embeddings
         value = value + temporal_embeddings
@@ -187,12 +223,18 @@ class MaskedTemporalVisionTransformer(nn.Module):
         spatial_embeddings = self.spatial_pos_embedding(torch.arange(num_patches).to(device=patches.device))
         spatial_embeddings = spatial_embeddings.view(1, num_patches, 1, self.patch_size_h, self.patch_size_w).repeat(b, 1, t, 1, 1)
         spatial_embeddings = spatial_embeddings.view(b * num_patches, t, self.patch_size_h, self.patch_size_w)
+        # query = query + spatial_embeddings[:, -1:, :, :]
+        # key = key + spatial_embeddings[:, :-1, :, :]
+        # value = value + spatial_embeddings
         query = query + spatial_embeddings
         key = key + spatial_embeddings
         value = value + spatial_embeddings
 
         # Step 3: Attention
-        query = query.view(b, num_patches, t * self.patch_size_h * self.patch_size_w).permute(1,0,2).contiguous() # [num_patches, b, t * h * w]
+        # query = query.view(b, num_patches, 1 * self.patch_size_h * self.patch_size_w).permute(1,0,2).contiguous() # [num_patches, b, 1 * h * w]
+        # key = key.view(b, num_patches, (t-1) * self.patch_size_h * self.patch_size_w).permute(1,0,2).contiguous()
+        # value = value.view(b, num_patches, t * self.patch_size_h * self.patch_size_w).permute(1,0,2).contiguous()
+        query = query.view(b, num_patches, t * self.patch_size_h * self.patch_size_w).permute(1,0,2).contiguous() # [num_patches, b, 1 * h * w]
         key = key.view(b, num_patches, t * self.patch_size_h * self.patch_size_w).permute(1,0,2).contiguous()
         value = value.view(b, num_patches, t * self.patch_size_h * self.patch_size_w).permute(1,0,2).contiguous()
 
@@ -202,14 +244,12 @@ class MaskedTemporalVisionTransformer(nn.Module):
 
         # patches = patches[:, -1, :]  # Temporal fusion: [b * num_patches, dim] (we pick the latest frame)
 
-        patches = patches.view(b, num_patches, -1)  # [b, num_patches, dim]
+        # patches = patches.view(b, num_patches, -1)  # [b, num_patches, dim]
 
         # Reconstruct the spatial map
         reconstructed_patches = self.reconstruct_from_patches(patches, h, w)
 
         # Step 4: Channel upsampling (to original number of channels)
-        # upsampled = self.channel_upsampling(reconstructed_patches)
-
         upsampled = self.out_proj(reconstructed_patches)
 
         return upsampled

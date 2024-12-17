@@ -38,12 +38,15 @@ def main():
 
     MODEL_DIRS = [
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V',
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/scope/point_pillar_scope_more_steps_all_cavs_2024_11_12_19_54_32',
+        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/scope/point_pillar_scope_more_steps_all_cavs_2024_11_12_19_54_32',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/202411131117',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/scope_temporal_4_steps_2024_11_15_11_50_15'
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121125726',
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121210112',
-        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241126212435'
+        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241126212435',
+        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241206143522',
+        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241216162245',
+        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241217105054'
     ]
 
     # HYPES_YAML_FILES = [os.path.join(model_dir, 'config.yaml') for model_dir in MODEL_DIRS]
@@ -54,7 +57,8 @@ def main():
     TEMPORAL_STEPS = 4
     TEMPORAL_EGO_ONLY = False
     COMMUNICATION_DROPOUT = 0.25
-    
+    TEMPORAL_POTENTIAL_ONLY = True
+
     print(f'Eval for all models with configs: temporal steps = {TEMPORAL_STEPS}, temporal ego only = {TEMPORAL_EGO_ONLY}')
 
     for MODEL_DIR, HYPES_YAML_FILE in zip(MODEL_DIRS, HYPES_YAML_FILES):
@@ -66,6 +70,7 @@ def main():
         hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
         hypes['fusion']['args']['temporal_ego_only'] = TEMPORAL_EGO_ONLY
         hypes['fusion']['args']['communication_dropout'] = COMMUNICATION_DROPOUT
+        hypes['fusion']['args']['temporal_potential_only'] = TEMPORAL_POTENTIAL_ONLY
 
         hypes['model']['args']['fusion_args']['communication']['thre'] = 0
         hypes['postprocess']['target_args']['score_threshold'] = 0.23
@@ -76,8 +81,6 @@ def main():
         hypes['train_params']['frame'] = TEMPORAL_STEPS - 1
         hypes['model']['args']['fusion_args']['frame'] = TEMPORAL_STEPS - 1
 
-        # DEBUG
-        use_scenarios_idx = [0]
         use_scenarios_idx = None
 
         print('Dataset Building')
@@ -91,7 +94,7 @@ def main():
         data_loader = DataLoader(
             opencood_dataset,
             batch_size=1,
-            num_workers=1,
+            num_workers=16,
             collate_fn=opencood_dataset.collate_batch_test,
             shuffle=False,
             pin_memory=False,
@@ -107,7 +110,12 @@ def main():
 
         print('Loading Model from checkpoint')
         _, model = train_utils.load_saved_model(MODEL_DIR, model)
+        model = model.to(device)
         model.eval()
+
+        # set all requires grad to False
+        for param in model.parameters():
+            param.requires_grad = False
 
         standard_result_stats = create_result_stat_dict()
         temporal_result_stats = create_temporal_result_stat_dict()

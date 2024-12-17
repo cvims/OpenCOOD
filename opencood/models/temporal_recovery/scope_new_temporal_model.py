@@ -59,9 +59,8 @@ class TemporalPointPillarScope(nn.Module):
         # TODO - To config parameters
         image_size = (100, 352)
         in_channels = 256       # Eingabekanäle (z. B. RGB-Bilder)
-        patch_size = (25, 88)    # Größe der Patches
-        # patch_size = (50, 88)
-        num_heads = 4           # Anzahl der Attention-Köpfe
+        patch_size = (25, 44)   # Größe der Patches
+        num_heads = 4           # Anzahl der Attention heads
         seq_len = 4             # Größe der Eingabebilder (Höhe und Breite)
 
         # New
@@ -115,10 +114,10 @@ class TemporalPointPillarScope(nn.Module):
         self.reg_head = nn.Conv2d(128 * 2, 7 * args['anchor_number'],
                                   kernel_size=1)
         
-        self.cls_head_new = nn.Conv2d(2, args['anchor_number'],
-                                      kernel_size=1)
-        self.reg_head_new = nn.Conv2d(2, 7 * args['anchor_number'],
-                                      kernel_size=1)
+        # self.cls_head_new = nn.Conv2d(2, args['anchor_number'],
+        #                               kernel_size=1)
+        # self.reg_head_new = nn.Conv2d(2, 7 * args['anchor_number'],
+        #                               kernel_size=1)
         if args['backbone_fix']:
             self.backbone_fix()
 
@@ -287,19 +286,19 @@ class TemporalPointPillarScope(nn.Module):
             fused_features#, data_dict_list
         )
 
-        # psm_temporal = self.cls_head(temporal_output)
-        # # rm_temporal = self.reg_head(temporal_output)
+        psm_temporal = self.cls_head(temporal_output)
+        # rm_temporal = self.reg_head(temporal_output)
         
-        # ego_feature_list = [x[0:1,:] for x in regroup_feature_list[0]]
-        # ego_feature = torch.cat(ego_feature_list,dim=0)
-        # final_feature = self.late_fusion([temporal_output,ego_feature,fused_feature],psm_temporal,psm_single_v,psm_cross)
-        # # print('fused_feature:{},final_feature:{}'.format(fused_feature.shape,final_feature.shape))
+        ego_feature_list = [x[0:1,:] for x in regroup_feature_list[0]]
+        ego_feature = torch.cat(ego_feature_list,dim=0)
+        final_feature = self.late_fusion([temporal_output,ego_feature,fused_feature],psm_temporal,psm_single_v,psm_cross)
+        # print('fused_feature:{},final_feature:{}'.format(fused_feature.shape,final_feature.shape))
         
-        # psm = self.cls_head(final_feature)
-        # rm = self.reg_head(final_feature)
+        psm = self.cls_head(final_feature)
+        rm = self.reg_head(final_feature)
 
-        psm = self.cls_head_new(temporal_output)
-        rm = self.reg_head_new(temporal_output)
+        # psm = self.cls_head_new(temporal_output)
+        # rm = self.reg_head_new(temporal_output)
 
         output_dict = {'psm': psm,
                     'rm': rm

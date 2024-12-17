@@ -38,15 +38,17 @@ def main():
     TRAIN_DATA_PATH = '/data/public_datasets/OPV2V/original/train'
     VALIDATE_DATA_PATH = '/data/public_datasets/OPV2V/original/validate'
 
-    MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
+    DEFAULT_MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V'
+    MODEL_DIR = r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241206143522'
 
-    HYPES_YAML_FILE = os.path.join(MODEL_DIR, 'config.yaml')
+    HYPES_YAML_FILE = os.path.join(DEFAULT_MODEL_DIR, 'config.yaml')
 
     EPOCHS = 40
     
     TEMPORAL_STEPS = 4
     TEMPORAL_EGO_ONLY = False
     COMMUNICATION_DROPOUT = 0.5
+    TEMPORAL_POTENTIAL_ONLY = True
 
     hypes = yaml_utils.load_yaml(HYPES_YAML_FILE, None)
 
@@ -56,6 +58,7 @@ def main():
     hypes['fusion']['args']['queue_length'] = TEMPORAL_STEPS
     hypes['fusion']['args']['temporal_ego_only'] = TEMPORAL_EGO_ONLY
     hypes['fusion']['args']['communication_dropout'] = COMMUNICATION_DROPOUT
+    hypes['fusion']['args']['temporal_potential_only'] = TEMPORAL_POTENTIAL_ONLY
 
     hypes['model']['args']['fusion_args']['communication']['thre'] = 0
     hypes['postprocess']['target_args']['score_threshold'] = 0.23
@@ -66,10 +69,12 @@ def main():
     hypes['train_params']['frame'] = TEMPORAL_STEPS - 1
     hypes['model']['args']['fusion_args']['frame'] = TEMPORAL_STEPS - 1
 
+    hypes['train_params']['eval_freq'] = 5
+
     use_scenarios_idx = None
-    use_scenarios_idx = [
-        0, 5, 11, 14, 22, 24, 35, 40, 41, 42
-    ]
+    # use_scenarios_idx = [
+    #     0, 5, 11, 14, 22, 24, 35, 40, 41, 42
+    # ]  # Obsolete with temporal potential only
 
     print('Dataset Building')
     opencood_dataset_train = build_dataset(
@@ -90,21 +95,21 @@ def main():
 
     hypes['fusion']['args']['communication_dropout'] = 0.0
 
-    # opencood_dataset_validate = build_dataset(
-    #     hypes, visualize=False, train=False,
-    #     # use_scenarios_idx=use_scenarios_idx,
-    #     preload_lidar_files=False
-    # )
+    opencood_dataset_validate = build_dataset(
+        hypes, visualize=False, train=False,
+        # use_scenarios_idx=use_scenarios_idx,
+        preload_lidar_files=False
+    )
 
-    # data_loader_validate = DataLoader(
-    #     opencood_dataset_validate,
-    #     batch_size=1,
-    #     num_workers=16,
-    #     collate_fn=opencood_dataset_validate.collate_batch_test,
-    #     shuffle=False,
-    #     pin_memory=False,
-    #     drop_last=False
-    # )
+    data_loader_validate = DataLoader(
+        opencood_dataset_validate,
+        batch_size=1,
+        num_workers=16,
+        collate_fn=opencood_dataset_validate.collate_batch_test,
+        shuffle=False,
+        pin_memory=False,
+        drop_last=False
+    )
 
     print('Creating Model')
     model = TemporalPointPillarScope(hypes['model']['args'])
@@ -138,14 +143,17 @@ def main():
     num_steps = len(data_loader_train)
     scheduler = train_utils.setup_lr_schedular(hypes, optimizer, num_steps)
 
-    mask_model_criterion = TemporalMaskBCELoss(
-        hypes,
-        pos_weight=100.0,
-        neg_weight=1.0
-    )
+    # mask_model_criterion = TemporalMaskBCELoss(
+    #     hypes,
+    #     pos_weight=100.0,
+    #     neg_weight=1.0
+    # )
 
-    hypes['loss']['args']['temporal_cls_weight'] = 1.0
-    hypes['loss']['args']['temporal_reg'] = 10.0
+    hypes['loss']['args']['cls_weight'] = 1.0
+    hypes['loss']['args']['reg'] = 1.0
+
+    hypes['loss']['args']['temporal_cls_weight'] = 20.0
+    hypes['loss']['args']['temporal_reg'] = 20.0
     scope_default_criterion = TemporalPointPillarLoss(hypes['loss']['args'])
 
     for epoch in range(EPOCHS):
@@ -158,9 +166,7 @@ def main():
             # the model will be evaluation mode during validation
             model.eval()
             model.temporal_mask_model.train()
-            model.cls_head_new.train()
-            model.reg_head_new.train()
-            # model.late_fusion.train()
+            model.late_fusion.train()
             model.cls_head.train()
             model.reg_head.train()
             model.zero_grad()
@@ -206,66 +212,67 @@ def main():
                 os.path.join(SAVE_PATH, 'net_epoch%d.pth' % (epoch + 1)))
         
 
-        # if epoch % hypes['train_params']['eval_freq'] == 0:
-        #     valid_ave_loss = []
-        #     temporal_result_stats = create_temporal_result_stat_dict()
+        if epoch % hypes['train_params']['eval_freq'] == 0:
+            valid_ave_loss = []
+            temporal_result_stats = create_temporal_result_stat_dict()
 
-        #     pbar_val = tqdm.tqdm(total=len(data_loader_validate), leave=True)
-        #     with torch.no_grad():
-        #         for batch_data_list in data_loader_validate:
-        #             model.eval()
-        #             model.temporal_mask_model.eval()
-        #             model.late_fusion.eval()
-        #             model.cls_head.eval()
-        #             model.reg_head.eval()
-        #             model.cls_head_new.eval()
-        #             model.reg_head_new.eval()
+            pbar_val = tqdm.tqdm(total=len(data_loader_validate), leave=True)
+            with torch.no_grad():
+                for batch_data_list in data_loader_validate:
+                    model.eval()
+                    model.temporal_mask_model.eval()
+                    model.late_fusion.eval()
+                    model.cls_head.eval()
+                    model.reg_head.eval()
 
-        #             batch_data = batch_data_list[-1]
+                    batch_data = batch_data_list[-1]
 
-        #             batch_data_list = train_utils.to_device(batch_data_list, device)
-        #             batch_data = train_utils.to_device(batch_data, device)
+                    batch_data_list = train_utils.to_device(batch_data_list, device)
+                    batch_data = train_utils.to_device(batch_data, device)
 
-        #             output = model(batch_data_list)
+                    output = model(batch_data_list)
 
-        #             # mask_model_loss = mask_model_criterion(
-        #             #     output['temporal_mask'],
-        #             #     batch_data['ego']['object_bbx_center'],
-        #             #     batch_data['ego']['object_detection_info_mapping']
-        #             # )
+                    # mask_model_loss = mask_model_criterion(
+                    #     output['temporal_mask'],
+                    #     batch_data['ego']['object_bbx_center'],
+                    #     batch_data['ego']['object_detection_info_mapping']
+                    # )
 
-        #             scope_loss = scope_default_criterion(
-        #                 output,
-        #                 batch_data['ego']['label_dict'],
-        #                 batch_data['ego']['temporal_label_dict']
-        #             )
+                    scope_loss = scope_default_criterion(
+                        output,
+                        batch_data['ego']['label_dict'],
+                        batch_data['ego']['temporal_label_dict']
+                    )
 
-        #             valid_ave_loss.append(scope_loss.item())
+                    valid_ave_loss.append(scope_loss.item())
 
-        #             # temporal evaluation
-        #             pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids = \
-        #             opencood_dataset_validate.post_process(batch_data, {'ego': output})
+                    # temporal evaluation
+                    pred_box_tensor, pred_score, gt_box_tensor, gt_object_ids = \
+                    opencood_dataset_validate.post_process(batch_data, {'ego': output})
 
-        #             _, gt_object_ids = opencood_dataset_validate.post_processor.generate_gt_bbx(batch_data)
-        #             gt_object_ids_criteria = batch_data['ego']['object_detection_info_mapping'][-1]
-        #             gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
+                    _, gt_object_ids = opencood_dataset_validate.post_processor.generate_gt_bbx(batch_data)
+                    gt_object_ids_criteria = batch_data['ego']['object_detection_info_mapping'][-1]
+                    gt_object_ids_criteria = {o_id: gt_object_ids_criteria[o_id] for o_id in gt_object_ids}
 
-        #             for iou_thre in [0.3, 0.5, 0.7]:
-        #                 eval_utils.calculate_temporal_recovered_hits(
-        #                     pred_box_tensor,
-        #                     pred_score,
-        #                     gt_box_tensor,
-        #                     temporal_result_stats,
-        #                     iou_thre,
-        #                     gt_object_ids_criteria)
+                    for iou_thre in [0.3, 0.5, 0.7]:
+                        eval_utils.calculate_temporal_recovered_hits(
+                            pred_box_tensor,
+                            pred_score,
+                            gt_box_tensor,
+                            temporal_result_stats,
+                            iou_thre,
+                            gt_object_ids_criteria)
 
-        #             pbar_val.update(1)
+                    pbar_val.update(1)
             
-        #     valid_ave_loss = statistics.mean(valid_ave_loss)
-        #     print('At epoch %d, the validation loss is %f' % (epoch,
-        #                                                       valid_ave_loss))
-        #     print('At epoch %d, the temporal evaluation is %s' % (epoch,
-        #                                                       temporal_result_stats))
+            valid_ave_loss = statistics.mean(valid_ave_loss)
+            print('At epoch %d, the validation loss is %f' % (epoch,
+                                                              valid_ave_loss))
+            print('At epoch %d, the temporal evaluation is %s' % (epoch,
+                                                              temporal_result_stats))
+        
+        # reinitialize the train dataset
+        opencood_dataset_train.reinitialize()
 
 
 if __name__ == '__main__':

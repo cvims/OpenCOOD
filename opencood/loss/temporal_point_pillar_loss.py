@@ -284,16 +284,19 @@ class TemporalPointPillarLoss(nn.Module):
         total_loss = self.loss_dict['total_loss']
         reg_loss = self.loss_dict['reg_loss']
         conf_loss = self.loss_dict['conf_loss']
+        temp_conf_loss = self.loss_dict['temp_conf_loss']
+        temp_reg_loss = self.loss_dict['temp_reg_loss']
+
         if pbar is None:
-            print("[epoch %d][%d/%d], || Loss: %.4f || Conf Loss: %.4f"
-                " || Loc Loss: %.4f" % (
+            print("[epoch %d][%d/%d], || Loss: %.4f || Conf Loss: %.4f || Temp conf loss: %.4f"
+                " || Loc Loss: %.4f || Temp loc loss: %.4f" % (
                     epoch, batch_id + 1, batch_len,
-                    total_loss.item(), conf_loss.item(), reg_loss.item()))
+                    total_loss.item(), conf_loss.item(), temp_conf_loss.item(), reg_loss.item(), temp_reg_loss.item()))
         else:
-            pbar.set_description("[epoch %d][%d/%d], || Loss: %.4f || Conf Loss: %.4f"
-                  " || Loc Loss: %.4f" % (
+            pbar.set_description("[epoch %d][%d/%d], || Loss: %.4f || Conf Loss: %.4f || Temp conf loss: %.4f"
+                  " || Loc Loss: %.4f || Temp loc loss: %.4f" % (
                       epoch, batch_id + 1, batch_len,
-                      total_loss.item(), conf_loss.item(), reg_loss.item()))
+                      total_loss.item(), conf_loss.item(), temp_conf_loss.item(), reg_loss.item(), temp_reg_loss.item()))
 
 
         if writer:
