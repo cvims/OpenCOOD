@@ -21,7 +21,10 @@ from opencood.utils import eval_utils
 
 def train_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
-    parser.add_argument("--hypes_yaml", type=str, required=True,
+    parser.add_argument("--hypes_yaml", type=str,
+                        # default=r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/configs/scope_temp/equal_temp_loss_comm_dropout_temp_pot_only.yaml',
+                        # default=r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/hypes_yaml/configs/test.yaml',
+                        required=True,
                         help='data generation yaml file needed ')
     parser.add_argument('--model_dir', default='',
                         help='Continued training path')
@@ -53,6 +56,30 @@ def main():
 
     PRETRAINED_MODEL_PATH = hypes['train_params']['pretrained_model'] if 'pretrained_model' in hypes['train_params'] else None
 
+    print('---------------Creating Model------------------')
+    model = train_utils.create_model(hypes)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # if we want to train from last checkpoint.
+    if MODEL_DIR:
+        saved_path = MODEL_DIR
+        init_epoch, model = train_utils.load_saved_model(saved_path, model)
+    elif PRETRAINED_MODEL_PATH:
+        init_epoch = 0
+        model = train_utils.load_saved_weights(PRETRAINED_MODEL_PATH, model)
+        saved_path = train_utils.setup_train(hypes)
+    else:
+        init_epoch = 0
+        # if we train the model from scratch, we need to create a folder
+        # to save the model
+        saved_path = train_utils.setup_train(hypes)
+
+    # we assume gpu is necessary
+    if torch.cuda.is_available():
+        model.to(device)
+    model_without_ddp = model
+
+
     print('-----------------Dataset Building------------------')
     opencood_train_dataset = build_dataset(
         hypes, visualize=False, train=True,
@@ -77,29 +104,6 @@ def main():
                             shuffle=False,
                             pin_memory=False,
                             drop_last=True)
-
-    print('---------------Creating Model------------------')
-    model = train_utils.create_model(hypes)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # if we want to train from last checkpoint.
-    if MODEL_DIR:
-        saved_path = MODEL_DIR
-        init_epoch, model = train_utils.load_saved_model(saved_path, model)
-    elif PRETRAINED_MODEL_PATH:
-        init_epoch = 0
-        model = train_utils.load_saved_weights(PRETRAINED_MODEL_PATH, model)
-        saved_path = train_utils.setup_train(hypes)
-    else:
-        init_epoch = 0
-        # if we train the model from scratch, we need to create a folder
-        # to save the model
-        saved_path = train_utils.setup_train(hypes)
-
-    # we assume gpu is necessary
-    if torch.cuda.is_available():
-        model.to(device)
-    model_without_ddp = model
 
     # define the loss
     criterion = train_utils.create_loss(hypes)

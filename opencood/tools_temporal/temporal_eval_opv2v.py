@@ -32,36 +32,27 @@ def create_temporal_result_stat_dict():
 
 
 def main():
-    eval_utils.set_random_seed(0)
-
     DATA_PATH = '/data/public_datasets/OPV2V/original/test'
 
     MODEL_DIRS = [
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V',
-        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/scope/point_pillar_scope_more_steps_all_cavs_2024_11_12_19_54_32',
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/202411131117',
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal/scope/scope_temporal_4_steps_2024_11_15_11_50_15'
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121125726',
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241121210112',
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241126212435',
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241206143522',
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241216162245',
-        # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241217105054'
+        r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V',
+        r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/scope/no_temp_loss',
     ]
 
     HYPES_YAML_FILES = [os.path.join(model_dir, 'config.yaml') for model_dir in MODEL_DIRS]
-    # HYPES_YAML_FILES = [r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V/config.yaml']
-
-    # STANDARD SCOPE SETTING: Temporal steps = 2; Temporal ego only: True
 
     TEMPORAL_STEPS = 4
     TEMPORAL_EGO_ONLY = False
-    COMMUNICATION_DROPOUT = 0.25
-    TEMPORAL_POTENTIAL_ONLY = True
+    COMMUNICATION_DROPOUT = 0.0
+    TEMPORAL_POTENTIAL_ONLY = False
+
+    CALCULATE_AP_WITHOUT_TEMPORAL_OBJECTS = False
 
     print(f'Eval for all models with configs: temporal steps = {TEMPORAL_STEPS}, temporal ego only = {TEMPORAL_EGO_ONLY}')
 
     for MODEL_DIR, HYPES_YAML_FILE in zip(MODEL_DIRS, HYPES_YAML_FILES):
+        eval_utils.set_random_seed(0)
+
         hypes = yaml_utils.load_yaml(HYPES_YAML_FILE, None)
 
         hypes['root_dir'] = DATA_PATH
@@ -74,12 +65,17 @@ def main():
 
         hypes['model']['args']['fusion_args']['communication']['thre'] = 0
         hypes['postprocess']['target_args']['score_threshold'] = 0.23
-        hypes['wild_setting']['xyz_std'] = 0.2
-        hypes['wild_setting']['ryp_std'] = 0.2
 
         hypes['train_params']['batch_size'] = 1
         hypes['train_params']['frame'] = TEMPORAL_STEPS - 1
         hypes['model']['args']['fusion_args']['frame'] = TEMPORAL_STEPS - 1
+
+        # was training without temporal loss? - additionally calculate the temporal-free evaluation
+        if hypes['loss']['core_method'] == 'point_pillar_loss':
+            CALCULATE_AP_WITHOUT_TEMPORAL_OBJECTS = True
+        
+        if TEMPORAL_POTENTIAL_ONLY:
+            CALCULATE_AP_WITHOUT_TEMPORAL_OBJECTS = False
 
         use_scenarios_idx = None
 
@@ -118,6 +114,7 @@ def main():
             param.requires_grad = False
 
         standard_result_stats = create_result_stat_dict()
+        wo_temp_objects_result_stats = create_result_stat_dict()
         temporal_result_stats = create_temporal_result_stat_dict()
 
         for i, batch_data in tqdm(enumerate(data_loader), total=len(data_loader)):
@@ -141,6 +138,17 @@ def main():
                         gt_box_tensor,
                         standard_result_stats,
                         iou_thre)
+                
+                if CALCULATE_AP_WITHOUT_TEMPORAL_OBJECTS:
+                    # standard evaluation (ignore temporal objects)
+                    for iou_thre in [0.3, 0.5, 0.7]:
+                        eval_utils.calculate_tp_fp_temporal_removed(
+                            pred_box_tensor,
+                            pred_score,
+                            gt_box_tensor,
+                            wo_temp_objects_result_stats,
+                            iou_thre,
+                            gt_object_ids_criteria)
 
                 # temporal evaluation
                 for iou_thre in [0.3, 0.5, 0.7]:
@@ -156,6 +164,11 @@ def main():
         print(f'Results for {MODEL_DIR}')
         eval_utils.eval_final_results(standard_result_stats, None, None)
         print(f'Temporal Evaluation Results:', temporal_result_stats)
+
+        if CALCULATE_AP_WITHOUT_TEMPORAL_OBJECTS:
+            print('Results for model without temporal objects')
+            eval_utils.eval_final_results(wo_temp_objects_result_stats, None, None)
+
 
 if __name__ == '__main__':
     main()

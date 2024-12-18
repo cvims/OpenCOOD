@@ -51,11 +51,13 @@ class CustomAttention(nn.Module):
 
 
 class MaskedTemporalVisionTransformer(nn.Module):
-    def __init__(self, num_heads, channels: int, patch_size: tuple, image_size: tuple, sequence_length=4):
+    def __init__(
+            self, num_heads, input_feature_size_h: int, input_feature_size_w: int, input_feature_channels: int,
+            patch_size_h: int, patch_size_w: int, sequence_length=4):
         super(MaskedTemporalVisionTransformer, self).__init__()
         self.num_heads = num_heads
-        self.patch_size_h, self.patch_size_w = patch_size
-        self.num_patches = (image_size[0] // self.patch_size_h) * (image_size[1] // self.patch_size_w)
+        self.patch_size_h, self.patch_size_w = patch_size_h, patch_size_w
+        self.num_patches = (input_feature_size_h // self.patch_size_h) * (input_feature_size_w // self.patch_size_w)
 
         self.channel_downsize = 1
 
@@ -65,10 +67,10 @@ class MaskedTemporalVisionTransformer(nn.Module):
 
         # input embedder
         self.feature_map_embedding = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(channels),
+            nn.Conv2d(input_feature_channels, input_feature_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(input_feature_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(channels, self.channel_downsize, kernel_size=1),
+            nn.Conv2d(input_feature_channels, self.channel_downsize, kernel_size=1),
             nn.BatchNorm2d(self.channel_downsize),
             nn.ReLU(inplace=True),
         )
@@ -105,11 +107,11 @@ class MaskedTemporalVisionTransformer(nn.Module):
 
         # Final projection to reconstruct the spatial map
         self.channel_upsampling = nn.Sequential(
-            nn.Conv2d(1, channels // 2, kernel_size=3, padding=1),
-            nn.BatchNorm2d(channels // 2),
+            nn.Conv2d(1, input_feature_channels // 2, kernel_size=3, padding=1),
+            nn.BatchNorm2d(input_feature_channels // 2),
             nn.ReLU(inplace=True),
-            nn.Conv2d(channels // 2, channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(channels),
+            nn.Conv2d(input_feature_channels // 2, input_feature_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(input_feature_channels),
             nn.ReLU(inplace=True),
         )
 

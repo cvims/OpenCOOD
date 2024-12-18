@@ -132,6 +132,24 @@ def calculate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh):
     result_stat[iou_thresh]['gt'] += gt
 
 
+def calculate_tp_fp_temporal_removed(det_boxes, det_score, gt_boxes, result_stat, iou_thresh, gt_object_ids_criteria):
+    """
+    Calculate tp fps but ignore the temporal groundtruths.
+    E.g. SCOPE trained on the original dataset, to get the official AP results.
+    Temporal datasets otherwise, contains temporal groundtruths automatically.
+    """
+    keep_indices = [
+        i for i, gt_idx in enumerate(gt_object_ids_criteria) 
+        if not gt_object_ids_criteria[gt_idx]['temporal_recovered']
+    ]
+
+    # Create a new tensor with only the desired indices
+    gt_boxes = gt_boxes[keep_indices]
+
+    calculate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh)
+
+
+
 def match_gt_det_hungarian(det_boxes, gt_boxes, iou_thresh):
     """
     Match the detection bounding box with the groundtruth bounding box by
@@ -231,11 +249,11 @@ def calculate_tp_fp_kitti(
         filter_gts_idx = {i for i, gt_idx in enumerate(gt_object_ids_criteria) if not gt_object_ids_criteria[gt_idx]['temporal_recovered']}
     else:
         raise Exception('Either use_normal_gts or use_temporal_recovered_gts must be True')
-    
+
     if len(filter_gts_idx) == 1 and -1 in filter_gts_idx:
         # nothing to do
         return
-    
+
     if len(filter_gts_idx) > 0:
         # second dim of matched_pairs_indices is the index of gt_boxes
         # filter out the matched pairs that are not temporal recovered

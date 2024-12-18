@@ -1,156 +1,17 @@
-from numpy import record
-import torch.nn as nn
-
-from opencood.models.sub_modules.pillar_vfe import PillarVFE
-from opencood.models.sub_modules.point_pillar_scatter import PointPillarScatter
-from opencood.models.sub_modules.base_bev_backbone import BaseBEVBackbone
-from opencood.models.sub_modules.base_bev_backbone_resnet import ResNetBEVBackbone
-from opencood.models.sub_modules.downsample_conv import DownsampleConv
-from opencood.models.sub_modules.naive_compress import NaiveCompressor
-from opencood.models.fuse_modules.scope_attn import SCOPE
-from opencood.models.sub_modules.temporal_late_fusion import LateFusion
-from opencood.models.sub_modules.temporal_fusion_lstm import TemporalFusion_lstm
 import torch
-from opencood.models.sub_modules.torch_transformation_utils import warp_affine_simple
+import torch.nn as nn
+from opencood.models.point_pillar_scope import PointPillarScope
 from opencood.models.temporal_recovery.jeremias_attn import MaskedTemporalVisionTransformer
-from opencood.visualization.vis_utils import plot_feature_map
-
-def transform_feature(feature_list,matrix_list,downsample_rate,discrete_ratio):
-    B = len(feature_list[0])
-    _, C, H, W = feature_list[0][0].shape
-    new_list =[]
-    for i in range(0,len(matrix_list)):
-        pairwise_t_matrix = matrix_list[i]
-        pairwise_t_matrix = pairwise_t_matrix[:,:,:,[0, 1],:][:,:,:,:,[0, 1, 3]] # [B, L, L, 2, 3]
-        pairwise_t_matrix[...,0,1] = pairwise_t_matrix[...,0,1] * H / W
-        pairwise_t_matrix[...,1,0] = pairwise_t_matrix[...,1,0] * W / H
-        pairwise_t_matrix[...,0,2] = pairwise_t_matrix[...,0,2] / (downsample_rate * discrete_ratio * W) * 2
-        pairwise_t_matrix[...,1,2] = pairwise_t_matrix[...,1,2] / (downsample_rate * discrete_ratio * H) * 2
-        new_list.append(pairwise_t_matrix)
-        
-    temporal_list = []
-    for b in range(B):
-        input = [x[b][0:1,:] for x in feature_list]
-        input = torch.cat(input,dim=0)
-        
-        history_matrix = [m[b,0:1,1:2,:,:] for m in new_list]
-        history_matrix = torch.cat(history_matrix[1:],dim=1).squeeze(0)
-        history_matrix = torch.cat([new_list[0][b,0,0:1,:,:],history_matrix],dim=0)
-        
-        history_feature = warp_affine_simple(input,history_matrix,(H,W))
-        temporal_list.append(history_feature)
-    
-    return temporal_list
 
 
-class TemporalPointPillarScope(nn.Module):
+class TemporalPointPillarScope(PointPillarScope):
     def __init__(self, args):
-        super(TemporalPointPillarScope, self).__init__()
-
-        self.fusion_net = SCOPE(args['fusion_args'])
-        self.frame = args['fusion_args']['frame']
-        self.discrete_ratio = args['fusion_args']['voxel_size'][0]  # voxel_size[0]=0.4    
-        self.downsample_rate = args['fusion_args']['downsample_rate']  # 2/4, downsample rate from original feature map [200, 704]
-        self.temporal_fusion = TemporalFusion_lstm(args['fusion_args'])
-        self.late_fusion = LateFusion(args['fusion_args']['communication'])
-        self.multi_scale = args['fusion_args']['multi_scale']
-
-
-        # TODO - To config parameters
-        image_size = (100, 352)
-        in_channels = 256       # Eingabekanäle (z. B. RGB-Bilder)
-        patch_size = (25, 44)   # Größe der Patches
-        num_heads = 4           # Anzahl der Attention heads
-        seq_len = 4             # Größe der Eingabebilder (Höhe und Breite)
-
-        # New
-        self.temporal_mask_model = MaskedTemporalVisionTransformer(
-            num_heads=num_heads,
-            input_feature_channels=in_channels,
-            patch_size=patch_size,
-            image_size=image_size,
-            sequence_length=seq_len
+        super().__init__(
+            args,
+            temporal_fusion_module=MaskedTemporalVisionTransformer(
+                **args['fusion_args']['temporal_fusion']
+            )
         )
-
-        # PIllar VFE
-        self.pillar_vfe = PillarVFE(args['pillar_vfe'],
-                                    num_point_features=4,
-                                    voxel_size=args['voxel_size'],
-                                    point_cloud_range=args['lidar_range'])
-        self.scatter = PointPillarScatter(args['point_pillar_scatter'])
-        if 'resnet' in args['base_bev_backbone']:
-            self.backbone = ResNetBEVBackbone(args['base_bev_backbone'], 64)
-        else:
-            self.backbone = BaseBEVBackbone(args['base_bev_backbone'], 64)
-            
-        self.pillar_vfe_2 = PillarVFE(args['pillar_vfe'],
-                                    num_point_features=4,
-                                    voxel_size=args['voxel_size'],
-                                    point_cloud_range=args['lidar_range'])
-        self.scatter_2 = PointPillarScatter(args['point_pillar_scatter'])
-        if 'resnet' in args['base_bev_backbone']:
-            self.backbone_2 = ResNetBEVBackbone(args['base_bev_backbone'], 64)
-        else:
-            self.backbone_2 = BaseBEVBackbone(args['base_bev_backbone'], 64)
-
-        # used to downsample the feature map for efficient computation
-        self.shrink_flag = False
-        if 'shrink_header' in args:
-            self.shrink_flag = True
-            self.shrink_conv = DownsampleConv(args['shrink_header'])
-        self.compression = False
-
-        if args['compression'] > 0:
-            self.compression = True
-            self.naive_compressor = NaiveCompressor(256, args['compression'])
-
-        self.dcn = False
-        if 'dcn' in args:
-            self.dcn = True
-            self.dcn_net = DCNNet(args['dcn'])
-
-        self.cls_head = nn.Conv2d(128 * 2, args['anchor_number'],
-                                  kernel_size=1)
-        self.reg_head = nn.Conv2d(128 * 2, 7 * args['anchor_number'],
-                                  kernel_size=1)
-        
-        # self.cls_head_new = nn.Conv2d(2, args['anchor_number'],
-        #                               kernel_size=1)
-        # self.reg_head_new = nn.Conv2d(2, 7 * args['anchor_number'],
-        #                               kernel_size=1)
-        if args['backbone_fix']:
-            self.backbone_fix()
-
-    def backbone_fix(self):
-        """
-        Fix the parameters of backbone during finetune on timedelay。
-        """
-        for p in self.pillar_vfe.parameters():
-            p.requires_grad = False
-
-        for p in self.scatter.parameters():
-            p.requires_grad = False
-
-        for p in self.backbone.parameters():
-            p.requires_grad = False
-
-        if self.compression:
-            for p in self.naive_compressor.parameters():
-                p.requires_grad = False
-        if self.shrink_flag:
-            for p in self.shrink_conv.parameters():
-                p.requires_grad = False
-
-        for p in self.cls_head.parameters():
-            p.requires_grad = False
-        for p in self.reg_head.parameters():
-            p.requires_grad = False
-    
-    def regroup(self, x, record_len):
-        cum_sum_len = torch.cumsum(record_len, dim=0)
-        split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
-        return split_x
-        
 
     def forward(self, data_dict_list):
         batch_dict_list = [] 
@@ -242,7 +103,7 @@ class TemporalPointPillarScope(nn.Module):
         psm_single_i = torch.cat(psm_single_i, dim=0)
         rm_single_v = torch.cat(rm_single_v, dim=0)
         rm_single_i = torch.cat(rm_single_i, dim=0)
-        
+
         psm_cross = self.cls_head(fused_feature)
 
         ### Get all features instead of only the current frame features (default SCOPE)
@@ -261,7 +122,7 @@ class TemporalPointPillarScope(nn.Module):
                 fused_feature, communication_rates, result_dict = self.fusion_net(spatial_features,
                                                 psm_single,
                                                 record_len,
-                                                pairwise_t_matrix, 
+                                                pairwise_t_matrix,
                                                 self.backbone,
                                                 [self.shrink_conv, self.cls_head, self.reg_head])
                 if self.shrink_flag:

@@ -1,4 +1,3 @@
-from numpy import record
 import torch.nn as nn
 
 from opencood.models.sub_modules.pillar_vfe import PillarVFE
@@ -41,8 +40,11 @@ def transform_feature(feature_list,matrix_list,downsample_rate,discrete_ratio):
     return temporal_list
 
 class PointPillarScope(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, **kwargs):
         super(PointPillarScope, self).__init__()
+
+        # NEW
+        temporal_fusion_module = kwargs.get('temporal_fusion_module', None)
 
         # PIllar VFE
         self.pillar_vfe = PillarVFE(args['pillar_vfe'],
@@ -85,7 +87,10 @@ class PointPillarScope(nn.Module):
         self.frame = args['fusion_args']['frame']
         self.discrete_ratio = args['fusion_args']['voxel_size'][0]  # voxel_size[0]=0.4    
         self.downsample_rate = args['fusion_args']['downsample_rate']  # 2/4, downsample rate from original feature map [200, 704]
-        self.temporal_fusion = TemporalFusion_lstm(args['fusion_args'])
+        if temporal_fusion_module is not None:
+            self.temporal_fusion = temporal_fusion_module
+        else:
+            self.temporal_fusion = TemporalFusion_lstm(args['fusion_args'])
         self.late_fusion = LateFusion(args['fusion_args']['communication'])
         self.multi_scale = args['fusion_args']['multi_scale']
 
@@ -250,7 +255,6 @@ class PointPillarScope(nn.Module):
         rm_single_i = torch.cat(rm_single_i, dim=0)
         
         psm_cross = self.cls_head(fused_feature)
-        rm_cross = self.reg_head(fused_feature)
         
         ego_feature_list = [x[0:1,:] for x in regroup_feature_list[0]]
         ego_feature = torch.cat(ego_feature_list,dim=0)
