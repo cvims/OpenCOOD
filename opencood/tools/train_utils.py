@@ -29,6 +29,55 @@ def findLastCheckpoint(save_dir):
     return initial_epoch_
 
 
+def load_saved_weights(weights_path, model):
+    """
+    Load saved weights if existed
+
+    Parameters
+    __________
+    weights_path : str
+       model saved path
+    model : opencood object
+        The model instance.
+
+    Returns
+    -------
+    model : opencood object
+        The model instance loaded pretrained params.
+    """
+    assert os.path.exists(weights_path), '{} not found'.format(weights_path)
+
+    state_dict_ = torch.load(weights_path)
+    state_dict = {}
+
+    # convert data_parallal to model
+    for k in state_dict_:
+        if k.startswith('module') and not k.startswith('module_list'):
+            state_dict[k[7:]] = state_dict_[k]
+        else:
+            state_dict[k] = state_dict_[k]
+    
+    model_state_dict = model.state_dict()
+
+    for k in state_dict:
+        if k in model_state_dict:
+            if state_dict[k].shape != model_state_dict[k].shape:
+                print('Skip loading parameter {}, required shape{}, ' \
+                    'loaded shape{}.'.format(
+                    k, model_state_dict[k].shape, state_dict[k].shape))
+                state_dict[k] = model_state_dict[k]
+        else:
+            print('Drop parameter {}.'.format(k))
+    for k in model_state_dict:
+        if not (k in state_dict):
+            print('No param {}.'.format(k))
+            state_dict[k] = model_state_dict[k]
+
+    model.load_state_dict(state_dict, strict=False)
+
+    return model
+
+
 def load_saved_model(saved_path, model, epoch=None):
     """
     Load saved model if exiseted

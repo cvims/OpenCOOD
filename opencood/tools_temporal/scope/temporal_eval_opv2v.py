@@ -49,8 +49,8 @@ def main():
         # r'/home/dominik/Git_Repos/Private/OpenCOOD/runs/temporal_mask_model/20241217105054'
     ]
 
-    # HYPES_YAML_FILES = [os.path.join(model_dir, 'config.yaml') for model_dir in MODEL_DIRS]
-    HYPES_YAML_FILES = [r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V/config.yaml']
+    HYPES_YAML_FILES = [os.path.join(model_dir, 'config.yaml') for model_dir in MODEL_DIRS]
+    # HYPES_YAML_FILES = [r'/home/dominik/Git_Repos/Private/OpenCOOD/opencood/model_weights/SCOPE/weights/OPV2V/config.yaml']
 
     # STANDARD SCOPE SETTING: Temporal steps = 2; Temporal ego only: True
 
@@ -101,8 +101,8 @@ def main():
             drop_last=False)
 
         print('Creating Model')
-        # model = train_utils.create_model(hypes)
-        model = TemporalPointPillarScope(hypes['model']['args'])
+        model = train_utils.create_model(hypes)
+        # model = TemporalPointPillarScope(hypes['model']['args'])
         # we assume gpu is necessary
         if torch.cuda.is_available():
             model.cuda()
